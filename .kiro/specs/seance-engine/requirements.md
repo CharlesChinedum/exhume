@@ -34,6 +34,7 @@ The generator lives in `engine/` and is invoked through a local command-line and
 - **Call_Record**: The tuple of calldata, sender, return data or revert data, success flag, Event_Logs, and Observable_State for one call to one deployment.
 - **Observable_State**: The state compared after each call: the return data, the Event_Logs of the call, the `balance` of each deployment, the values returned by every `view` or `pure` function of the ABI that takes no arguments, and the values of public mapping getters for each address in the Actor_Set.
 - **Actor_Set**: The fixed set of sender addresses used by the Differential_Handler.
+- **Divergence_Taint**: The Call_Record flag `afterDivergence=true`, set on every Call_Record that follows the first `port-bug` in the same call sequence. A Call_Record with Divergence_Taint is counted but is never reported as a finding.
 - **Classification**: One of `match`, `reason-modernised`, `exorcised`, or `port-bug`.
 - **Exorcism**: A call classified as `exorcised`.
 - **Port_Bug**: A call classified as `port-bug`.
@@ -42,6 +43,15 @@ The generator lives in `engine/` and is invoked through a local command-line and
 - **Foundry_Shrinking**: Foundry's built-in invariant shrinking of a failing call sequence.
 - **Worker**: The `worker/` HTTP service, specified separately, that is a future consumer of the Entry_Point and the environment where `forge` runs.
 - **BEC**: BeautyChain, mainnet address `0xC5d105E63711398aF9bbff092d4B6769C82F793D`, solc 0.4.19, optimizer off.
+- **Setup_Record**: A Call_Record produced during setup (constructor, token-share transfer, or seed call) and marked `idx == -1`.
+- **Fuzz_Record**: A Call_Record produced by a fuzzed handler call, marked `idx >= 0`.
+- **Finding_Pair**: A (function, Classification) pair, with Classification `exorcised` or `port-bug`, whose first record with `afterDivergence=false` yields one finding.
+- **Discovery_Phase**: The séance phase that runs the fuzz campaign and collects Call_Records.
+- **Witness_Phase**: The séance phase that runs one Foundry_Shrinking campaign per selected Finding_Pair.
+- **Replay_Phase**: The séance phase that re-executes each shrunk sequence on freshly deployed instances.
+- **Deadline**: The single time limit, started when the Entry_Point starts and shared by `forge build`, the Discovery_Phase, the Witness_Phase, and the Replay_Phase.
+- **Witness_Cap**: The maximum number of Finding_Pairs taken from Fuzz_Records into the Witness_Phase, equal to 10.
+- **Unshrunk_Reason**: The reason a finding is reported unshrunk, one of `setup`, `witness-cap`, `witness-not-failed`, `replay-mismatch`, `deadline`.
 - **Planted_Port_Bug**: A test-only Port_Contract mutation in which an allowance is not decremented during `transferFrom`.
 - **Dropped_Emit_Mutation**: A test-only Port_Contract mutation in which an `emit` of an event that the Legacy_Contract emits is removed.
 
@@ -126,7 +136,7 @@ The generator lives in `engine/` and is invoked through a local command-line and
 2. WHEN a call is classified as `exorcised`, THE Séance_Engine SHALL record the call sequence prefix up to and including the exorcised call, in original call order, with the index of the exorcised call.
 3. WHILE comparison is stopped for a call sequence, THE Differential_Handler SHALL send zero further calls to either deployment in that sequence and SHALL report zero further divergences, of any class, for that sequence.
 4. WHEN a new call sequence starts, THE Differential_Handler SHALL deploy a fresh legacy deployment and a fresh 0.8 deployment, each with no state carried over from any previous sequence, and SHALL resume comparison from the first call of the new sequence.
-5. IF a call is classified as `port-bug` or `reason-modernised`, THEN THE Differential_Handler SHALL continue comparing the remaining calls in the call sequence.
+5. IF a call is classified as `port-bug` or `reason-modernised`, THEN THE Differential_Handler SHALL continue comparing and counting the remaining calls in the call sequence, and SHALL set `afterDivergence=true` (Divergence_Taint) on every Call_Record that follows the first `port-bug` of the scope defined as follows: IF a Setup_Record is classified as `port-bug`, THEN the scope SHALL be every fuzz call sequence, so that every Fuzz_Record carries `afterDivergence=true`; otherwise the scope SHALL be the single call sequence that contains the first `port-bug`.
 6. WHEN a call sequence ends in the stopped state, THE Séance_Engine SHALL report that sequence as ending in an `exorcised` result, with the index of the exorcised call.
 
 ### Requirement 6: Legacy-aware input generation
@@ -143,7 +153,7 @@ The generator lives in `engine/` and is invoked through a local command-line and
 6. WHEN an Arithmetic_Site operand has a type narrower than uint256, THE Input_Generator SHALL use `2^N` in place of `2^256` and `2^N - 1` in place of `2^256 - 1`, where `N` is the bit width of the narrowest operand type, and `M` in criteria 2 to 5 and 8 SHALL equal `2^N`.
 7. WHEN an Arithmetic_Site is reached through a function parameter, THE Input_Generator SHALL map each Targeted_Value to the calldata position of that parameter in the function's ABI encoding.
 8. WHEN an Arithmetic_Site is reached through a product of a dynamic array length and a value, as in BEC's `cnt * _value`, THE Input_Generator SHALL produce, for every array length `n` from 2 to 24 inclusive, the pair of `n` and the value `ceil(M / n)`, so that each product is at least `M` and the Wrapped_Product is smaller than `n`.
-9. WHILE the Differential_Handler is drawing a value for a parameter that reaches at least one Arithmetic_Site, THE Differential_Handler SHALL draw from the Targeted_Values with a probability of at least 50 percent per draw, and from unconstrained fuzz input otherwise.
+9. WHILE the Differential_Handler is drawing a value for a parameter that reaches at least one Arithmetic_Site and Targeted_Values exist, THE Differential_Handler SHALL use a Targeted_Value for every draw whose `keccak256(abi.encode(pick))` is even, selecting the entry at index `(hash >> 1) % n` where `n` is the number of entries, and SHALL use unconstrained fuzz input for every draw whose hash is odd, so that Targeted_Values are used about 50 percent of draws in expectation.
 10. WHEN an Arithmetic_Site is reachable only after a state precondition, THE Input_Generator SHALL include a seed call sequence of at most 10 calls that establishes that precondition, such as a balance set by a constructor, a prior transfer, or an `approve`, before the call that reaches the site.
 11. IF the Autopsy_Report contains no Arithmetic_Site, THEN THE Input_Generator SHALL return an empty Targeted_Value set and THE Differential_Handler SHALL use unconstrained fuzz input only.
 12. IF the Input_Generator cannot determine a seed call sequence that reaches an Arithmetic_Site, THEN THE Input_Generator SHALL mark that site as unreachable in its output, produce Targeted_Values for it anyway, and not fail the run.
@@ -158,15 +168,16 @@ The generator lives in `engine/` and is invoked through a local command-line and
 
 1. WHEN a séance finishes, THE Séance_Engine SHALL write a Séance_Report as a single JSON file to `graveyard/<name>/`, where `<name>` is the contract's graveyard directory name.
 2. IF the Séance_Engine cannot write the Séance_Report, THEN THE Séance_Engine SHALL report the séance as failed with an error indicating the write failure, and SHALL leave any previously existing Séance_Report in `graveyard/<name>/` unchanged.
-3. THE Séance_Report SHALL contain the count of calls for each Classification (`match`, `reason-modernised`, `exorcised`, `port-bug`), with a count of 0 for any Classification that has no calls, the total number of calls, the fuzz seed, the number of runs, and the contract name.
-4. THE Séance_Report SHALL contain, for each Exorcism and each Port_Bug, the function name, the shrunk calldata as a hex string, the sender address, the `msg.value` in wei as a decimal string, and the ordered sequence of preceding calls required to reproduce the call (an empty sequence when none are required).
+3. THE Séance_Report SHALL contain the count of calls for each Classification (`match`, `reason-modernised`, `exorcised`, `port-bug`), with a count of 0 for any Classification that has no calls, the total number of calls, the fuzz seed, the number of runs in the field `runs`, the invariant depth in the field `depth`, the contract name, and the `shrinking` object of criterion 12 (which carries `pairsSetup` and `deadlineReached`).
+4. THE Séance_Report SHALL contain, for each Exorcism and each Port_Bug, the function name, the calldata as a hex string (shrunk, or original when the finding is unshrunk), the sender address, the `msg.value` in wei as a decimal string, and the ordered sequence of preceding calls required to reproduce the call (an empty sequence when none are required), and, WHERE the finding is unshrunk, the field `unshrunk` set to true and the field `unshrunkReason` set to one Unshrunk_Reason.
 5. WHERE the Séance_Engine can attribute an Arithmetic_Site to an Exorcism, THE Séance_Report SHALL contain that Arithmetic_Site, identified by site id and source location, for the Exorcism.
 6. IF the Séance_Engine cannot attribute an Arithmetic_Site to an Exorcism, THEN THE Séance_Report SHALL mark the Arithmetic_Site of that Exorcism as unattributed.
 7. THE Séance_Report SHALL contain, for each Port_Bug, the legacy Call_Record and the port Call_Record, including the Event_Logs of each.
-8. THE Séance_Report SHALL validate against a published JSON schema.
+8. THE Séance_Report SHALL validate against a published JSON schema that requires the fields `runs`, `depth`, `totalCalls`, `counts`, the `shrinking` object of criterion 12, and, on each unshrunk finding, `unshrunk` and `unshrunkReason`.
 9. FOR ALL valid Séance_Report objects, serializing, then parsing, then serializing SHALL produce a byte-identical document to the first serialization (round-trip property).
 10. THE Séance_Report SHALL contain Classification counts whose sum equals the total number of calls.
 11. WHEN the same inputs and the same fuzz seed are used in two séances, THE Séance_Engine SHALL produce Séance_Reports with identical Classification counts, total number of calls, and number of runs.
+12. THE Séance_Report SHALL contain a `shrinking` object with the required fields `witnessCap`, `pairsFound`, `pairsSetup`, `pairsShrunk`, `pairsUnshrunk`, `pairsOverCap`, and `deadlineReached`, where `pairsSetup` is the number of Finding_Pairs reported with Unshrunk_Reason `setup`, `pairsOverCap` is the number reported with `witness-cap`, `pairsUnshrunk` is the number reported with `witness-not-failed`, `replay-mismatch`, or `deadline`, `deadlineReached` is true when the Deadline was reached during the Witness_Phase or the Replay_Phase, and `pairsFound` equals the sum of `pairsSetup`, `pairsShrunk`, `pairsUnshrunk`, and `pairsOverCap`.
 
 ### Requirement 8: Shrinking
 
@@ -174,10 +185,14 @@ The generator lives in `engine/` and is invoked through a local command-line and
 
 #### Acceptance Criteria
 
-1. WHEN a call sequence is classified as `exorcised` or `port-bug`, THE Séance_Engine SHALL shrink the call sequence using Foundry_Shrinking.
-2. WHEN Foundry_Shrinking finishes, THE Séance_Engine SHALL replay the shrunk sequence once against freshly deployed instances of the original bytecode and the port, and SHALL compare the replay Classification with the original Classification.
-3. IF the replay of a shrunk sequence yields a Classification different from the original, THEN THE Séance_Engine SHALL report the original unshrunk sequence, mark it as `unshrunk`, and retain the original Classification.
-4. WHEN several failing sequences share the same function and the same Classification, THE Séance_Engine SHALL report exactly one sequence for that (function, Classification) pair.
+1. WHEN Fuzz_Records yield Finding_Pairs, THE Séance_Engine SHALL shrink the call sequence of every `exorcised` or `port-bug` Finding_Pair using Foundry_Shrinking, ordering `exorcised` pairs before `port-bug` pairs and each group by first ordinal, except for Finding_Pairs reported unshrunk under criterion 5 (`setup`), criterion 6 (`witness-cap`), or Requirement 12 criterion 11 (`deadline`).
+2. WHEN Foundry_Shrinking finishes for a Finding_Pair, THE Séance_Engine SHALL replay the shrunk sequence once against freshly deployed instances of the original bytecode and the port, and SHALL compare the replay Classification with the original Classification.
+3. IF the replay of a shrunk sequence yields a Classification different from the original, THEN THE Séance_Engine SHALL report the original unshrunk sequence with `unshrunk` set to true and `unshrunkReason` set to `replay-mismatch`, and retain the original Classification.
+4. WHEN several failing sequences share the same function and the same Classification, THE Séance_Engine SHALL report exactly one sequence for that (function, Classification) pair, selected only from Call_Records that have `afterDivergence=false`, and SHALL include every Call_Record with `afterDivergence=true` in the Classification counts of the Séance_Report.
+5. WHEN the first Call_Record with `afterDivergence=false` of a Finding_Pair is a Setup_Record, THE Séance_Engine SHALL report the finding as-is with `unshrunk` set to true and `unshrunkReason` set to `setup`, SHALL NOT run the Witness_Phase or the Replay_Phase for that Finding_Pair, and SHALL NOT count that Finding_Pair toward the Witness_Cap.
+6. WHEN Fuzz_Record Finding_Pairs exceed the Witness_Cap, THE Séance_Engine SHALL report each Finding_Pair beyond the Witness_Cap with its original sequence, `unshrunk` set to true, and `unshrunkReason` set to `witness-cap`.
+7. IF the Foundry_Shrinking campaign of a Finding_Pair completes without reproducing the finding, THEN THE Séance_Engine SHALL report the original sequence with `unshrunk` set to true and `unshrunkReason` set to `witness-not-failed`.
+8. THE Séance_Engine SHALL assign `unshrunkReason` only from the closed set `setup`, `witness-cap`, `witness-not-failed`, `replay-mismatch`, and `deadline`.
 
 ### Requirement 9: BEC acceptance
 
@@ -189,9 +204,10 @@ The generator lives in `engine/` and is invoked through a local command-line and
 2. WHEN a séance runs on BEC and its 0.8 port, THE Séance_Engine SHALL report zero divergences classified as `port-bug` across all functions.
 3. WHEN a séance runs on BEC and its 0.8 port, THE Séance_Engine SHALL find the first `batchTransfer` exorcised divergence within 2,000 fuzz calls, using inputs generated from the autopsy-identified unchecked arithmetic sites.
 4. WHEN a séance on BEC reports the `batchTransfer` exorcised divergence, THE Séance_Report SHALL contain shrunk calldata in which the `_receivers` array length is between 2 and 20 inclusive, the product of the `_receivers` array length and `_value` is at least `2^256`, and the Wrapped_Product is less than or equal to the sender's balance in the Legacy_Deployment at the time of the call.
-5. WHEN a séance on BEC reports the `batchTransfer` exorcised divergence, THE Séance_Engine SHALL confirm the shrunk calldata by the replay of Requirement 8 criterion 2 on freshly deployed instances, and SHALL accept the divergence only when the replay Classification is `exorcised`.
-6. WHEN a séance on BEC completes, THE Exhume system SHALL store the Séance_Report in the `graveyard/bec/` directory, so that it is available as the precomputed report for the BEC entry.
-7. IF the séance on BEC finds no exorcised divergence in `batchTransfer` within 2,000 calls, reports one or more `port-bug` divergences, or fails the replay confirmation, THEN THE Séance_Engine SHALL mark the BEC acceptance run as failed, SHALL NOT overwrite an existing stored Séance_Report in `graveyard/bec/`, and SHALL report the failing condition (missing exorcism, call budget exceeded, port bug count, or replay mismatch) to the caller.
+5. WHEN a séance on BEC reports the `batchTransfer` exorcised divergence, THE Séance_Engine SHALL accept the divergence only when the finding is shrunk and the replay of Requirement 8 criterion 2 on freshly deployed instances yields the Classification `exorcised`.
+6. WHEN a séance on BEC completes and the BEC acceptance run has not failed, THE Exhume system SHALL store the Séance_Report in the `graveyard/bec/` directory, so that it is available as the precomputed report for the BEC entry.
+7. IF the séance on BEC finds no exorcised divergence in `batchTransfer` within 2,000 calls, or reports one or more `port-bug` divergences, THEN THE Séance_Engine SHALL fail the BEC acceptance run with the error code `ACCEPTANCE_FAILED` naming the failing condition (missing exorcism, call budget exceeded, or port bug count), SHALL NOT overwrite an existing stored Séance_Report in `graveyard/bec/`, and SHALL return a non-zero failure indication to the caller.
+8. IF the `batchTransfer` finding of the BEC séance is reported unshrunk with any Unshrunk_Reason (`setup`, `witness-cap`, `witness-not-failed`, `replay-mismatch`, or `deadline`), THEN THE Séance_Engine SHALL fail the BEC acceptance run with the error code `ACCEPTANCE_FAILED` naming that Unshrunk_Reason as `unshrunkReason`, SHALL NOT overwrite an existing stored Séance_Report in `graveyard/bec/`, and SHALL return a non-zero failure indication to the caller.
 
 ### Requirement 10: Planted port bug acceptance
 
@@ -205,7 +221,7 @@ The generator lives in `engine/` and is invoked through a local command-line and
 4. THE Séance_Engine SHALL include in the Observable_State the `allowed` mapping value for every ordered (owner, spender) pair in the Actor_Set, and SHALL compare these values between the Legacy_Deployment and the Port_Deployment after each call.
 5. IF the `allowed` value for any ordered (owner, spender) pair differs between the Legacy_Deployment and the Port_Deployment after a call that returned the same result in both, THEN THE Séance_Engine SHALL classify the divergence as `port-bug`.
 6. IF a séance on the Planted_Port_Bug Port_Contract reports zero Port_Bug divergences, THEN THE Séance_Engine SHALL mark the acceptance check as failed and SHALL return a non-zero failure indication to the caller.
-7. WHEN a séance completes on the BEC Legacy_Contract and a Port_Contract containing the Dropped_Emit_Mutation, THE Séance_Engine SHALL report at least one divergence classified as `port-bug` whose differing field is the Event_Logs, and SHALL report the legacy Event_Logs and the port Event_Logs for that divergence.
+7. WHEN a séance completes on the BEC Legacy_Contract and a Port_Contract containing the Dropped_Emit_Mutation, THE Séance_Engine SHALL report at least one divergence for the `transfer` function classified as `port-bug` that arises from the token-share `transfer` in setup, whose differing field is the Event_Logs, whose `unshrunkReason` is `setup`, and SHALL report the legacy Event_Logs and the port Event_Logs for that divergence, without requiring a shrunk finding.
 8. IF a séance on the Dropped_Emit_Mutation Port_Contract reports zero Port_Bug divergences, THEN THE Séance_Engine SHALL mark the acceptance check as failed and SHALL return a non-zero failure indication to the caller.
 
 ### Requirement 11: Autopsy input contract
@@ -238,5 +254,8 @@ The generator lives in `engine/` and is invoked through a local command-line and
 5. IF an input is present but invalid (a contract name that is empty or longer than 128 characters, an optimizer setting that is not a boolean, or source text that is empty or larger than 1 MiB), THEN THE Entry_Point SHALL return a structured error containing an error code and a message that names every invalid input, SHALL NOT start a run, and SHALL exit with a non-zero status when invoked as a command-line program.
 6. IF a séance fails for any other reason, THEN THE Entry_Point SHALL return a structured error containing an error code and a message, and SHALL exit with a non-zero status when invoked as a command-line program.
 7. WHERE a timeout is configured, THE Entry_Point SHALL use that timeout in seconds, and WHERE no timeout is configured, THE Entry_Point SHALL use a timeout of 300 seconds.
-8. IF a séance run exceeds the timeout, THEN THE Entry_Point SHALL stop `forge` within 5 seconds of the timeout, return a structured error with a timeout error code that contains the partial counts collected so far for each Classification, and exit with a non-zero status when invoked as a command-line program.
-9. WHEN a fuzz seed is supplied, THE Entry_Point SHALL pass the fuzz seed to Foundry unchanged, so that two runs with the same inputs and seed produce Séance_Reports with identical Classification counts.
+8. IF the Deadline is reached during `forge build` or the Discovery_Phase, THEN THE Entry_Point SHALL stop `forge` within 5 seconds of the Deadline, write no Séance_Report, return a structured error with the error code `TIMEOUT` and a `phase` field, and exit with a non-zero status when invoked as a command-line program.
+9. IF the Deadline is reached during `forge build`, THEN THE Entry_Point SHALL set the `phase` field of the `TIMEOUT` error to `build` and SHALL include no partial counts in the error.
+10. IF the Deadline is reached during the Discovery_Phase, THEN THE Entry_Point SHALL set the `phase` field of the `TIMEOUT` error to `discovery` and SHALL include in the error the partial counts collected so far for each Classification.
+11. IF the Deadline is reached during the Witness_Phase or the Replay_Phase, THEN THE Entry_Point SHALL stop `forge` within 5 seconds of the Deadline, launch no further `forge` runs, return no `TIMEOUT` error, report every Finding_Pair not yet shrunk and replayed with its original sequence, `unshrunk` set to true, and `unshrunkReason` set to `deadline`, set `deadlineReached` to true, write the Séance_Report, and exit with status 0 when invoked as a command-line program.
+12. WHEN a fuzz seed is supplied, THE Entry_Point SHALL pass the fuzz seed to Foundry unchanged, so that two runs with the same inputs and seed produce Séance_Reports with identical Classification counts.
