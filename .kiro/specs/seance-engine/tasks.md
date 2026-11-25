@@ -4,7 +4,7 @@
 
 The plan is in four parts. First, an integration task checks every Known risk in the design before any TypeScript exists. Each risk script runs twice: natively with the local Foundry 1.5.1 on macOS arm64 (first run), then in the linux/amd64 Docker image (second run). Second, the core path is built in this order: types and schemas, classifier, input generator, project generator and templates, report builder, runner, entry point and CLI. Third, the BEC acceptance run proves the path end to end (project generation, build, bytecode check, discovery, witness shrinking, replay, report written, exorcism in `batchTransfer`, zero port bugs). It uses a hand-made golden port and a hand-written Autopsy report for BEC (task 13.0). Fourth, the planted-bug acceptance run is required, and the dropped-emit mutation run and the timeout and deadline edge-case tests are optional.
 
-Implementation language is TypeScript (strict, Node 22, pnpm workspace, vitest, fast-check), as set by the design. Generated Solidity is tested with Foundry in the linux/amd64 Docker image.
+Implementation language is TypeScript (strict, Node 24, pnpm workspace, vitest, fast-check). The design says Node 22. The user decided on Node 24 (`">=24 <25"`) everywhere, and this plan follows that decision. Generated Solidity is tested with Foundry in the linux/amd64 Docker image.
 
 The design's Known risks section lists eight bullets, not five. Sub-tasks 1.2 to 1.9 cover all eight, one each, in the order the design lists them.
 
@@ -208,12 +208,14 @@ compilation_restrictions = [
   - Passed on the native results: every Known risk (1.2 to 1.9) is PASS natively, and the flagged design changes (including the seed-determinism decision in 1.10 item (g)) were reviewed by the user. The Docker pass is still pending. It does not block tasks 3 to 9. It is a prerequisite of task 10 (see below).
   - Docker pass: run `engine/test/docker/run-risks.sh`, refresh the Docker findings for 1.2 to 1.9, and record any native/Docker disagreement in 1.10. A FAIL or a disagreement needs an agreed design change before task 10 starts. Ask the user if questions arise.
 
-- [ ] 3. Scaffold the engine package and shared types
+- [x] 3. Scaffold the engine package and shared types
   - [x] 3.1 Set up the `engine/` package
-    - Create the pnpm workspace entry, `tsconfig.json` in strict mode for Node 22, vitest config, and a fast-check dependency, plus the `engine/src/seance/` and `engine/test/seance/` directories.
+    - Create the pnpm workspace entry, `tsconfig.json` in strict mode for Node 24, vitest config, and a fast-check dependency, plus the `engine/src/seance/` and `engine/test/seance/` directories.
+    - Create or update the root `package.json` with `"packageManager": "pnpm@11.25.0"` (the installed version) and `"engines": { "node": ">=24 <25" }`. Use `@types/node` `^24` in `engine/package.json` and set the same `engines` pin there.
+    - Note: the workspace steering rule `tech` (`.kiro` steering) still says Node 22. The user should update it to Node 24. This task does not edit steering files.
     - _Requirements: 12.1_
 
-  - [ ] 3.2 Define shared types and error model
+  - [x] 3.2 Define shared types and error model
     - Create `engine/src/seance/types.ts` with `SeanceInput`, `SeanceError` (including `phase` and `partialCounts`), error code union, `Result`, `Classification`, `CallRecord`, `NormLog`, `RecordLine`, `OrderedRecord`, `SeanceReport`, `Finding`, `UnshrunkReason`, `AutopsyReport`, `ArithmeticSite`, `Operand`, `TargetPlan`, `ParamSlot`, `AbiFunction`.
     - Keep one module so later tasks do not edit each other's types.
     - _Requirements: 4.8, 7.3, 7.4, 8.8, 11.1, 12.4_
@@ -398,6 +400,7 @@ compilation_restrictions = [
 
 - [ ] 10. Runner
   - Prerequisite for task 10 and all its sub-tasks: the Docker pass from checkpoint 2 is done (run `engine/test/docker/run-risks.sh`, refresh the 1.2 to 1.9 Docker findings, record any native/Docker disagreement in 1.10). The Runner is the first task that depends on Docker behaviour. The dependency graph is JSON and has no comment syntax, so this prerequisite is stated here only.
+  - Node version for images: the Docker image used for the séance runner and worker, and any image that runs the TypeScript Runner, must use Node 24 and the pnpm version pinned in the root `package.json` `packageManager` field. `engine/test/docker/Dockerfile` is a forge-only image and may not need Node. The Node 24 requirement applies to the future worker image and to any image that runs the Runner.
 
   - [ ] 10.1 Implement deadline and forge arguments in `runner.ts`
     - `makeDeadline`, `phaseBudgetMs`, and `buildForgeArgs` for discovery, witness k, and replay k, with anchored `--match-contract` regexes, the unchanged `--fuzz-seed`, and the `SEANCE_RECORD` environment.
@@ -526,6 +529,7 @@ compilation_restrictions = [
 - Each task references requirements by their numbers in `requirements.md`, and property tests reference the property numbers in `design.md`.
 - Property tests validate universal correctness properties. Unit tests and forge tests cover specific examples and edge cases.
 - Tasks that write to `report.ts` and `runner.ts` run in separate waves to avoid file conflicts.
+- Node 24 (`">=24 <25"`) replaces Node 22 throughout this plan. The steering rule `tech` still says Node 22 and the user should update it. Steering files were not edited.
 
 ## Task Dependency Graph
 

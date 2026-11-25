@@ -9,3 +9,6 @@ broadcast/
 
 # Séance risk-run caches
 engine/test/docker/.cache/
+
+# Séance output
+seance-out/
