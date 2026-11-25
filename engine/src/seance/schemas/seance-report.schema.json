@@ -1,0 +1,443 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://exhume.dev/schemas/seance-report.schema.json",
+  "title": "Exhume Séance report, schema version 1",
+  "description": "Not expressible here and checked in code: the four counts sum to totalCalls; pairsFound = pairsSetup + pairsShrunk + pairsUnshrunk + pairsOverCap; taintedCalls and setupCalls are within counts; key order. Numbers above 2^53 must be decimal strings by the producer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contract",
+    "seed",
+    "runs",
+    "depth",
+    "totalCalls",
+    "counts",
+    "taintedCalls",
+    "setupCalls",
+    "exorcisms",
+    "portBugs",
+    "sequenceResults",
+    "shrinking",
+    "unreachableSites"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1"
+    },
+    "contract": {
+      "type": "string",
+      "minLength": 1
+    },
+    "seed": {
+      "type": "string"
+    },
+    "runs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "depth": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "totalCalls": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "match",
+        "reason-modernised",
+        "exorcised",
+        "port-bug"
+      ],
+      "properties": {
+        "match": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reason-modernised": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "exorcised": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "port-bug": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "taintedCalls": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "setupCalls": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "exorcisms": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Finding"
+      }
+    },
+    "portBugs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Finding"
+      }
+    },
+    "sequenceResults": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "endedExorcised",
+        "exorcisedAtIndex"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "endedExorcised": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "exorcisedAtIndex": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "shrinking": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "witnessCap",
+        "pairsFound",
+        "pairsSetup",
+        "pairsShrunk",
+        "pairsUnshrunk",
+        "pairsOverCap",
+        "deadlineReached"
+      ],
+      "properties": {
+        "witnessCap": {
+          "const": 10
+        },
+        "pairsFound": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pairsSetup": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pairsShrunk": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pairsUnshrunk": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pairsOverCap": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deadlineReached": {
+          "type": "boolean"
+        }
+      }
+    },
+    "unreachableSites": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "Hex": {
+      "type": "string",
+      "pattern": "^0x([0-9a-fA-F]{2})*$"
+    },
+    "Address": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{40}$"
+    },
+    "Wei": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$",
+      "description": "Decimal."
+    },
+    "SourceLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "line",
+        "column"
+      ],
+      "properties": {
+        "file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "column": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "NormLog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "emitter",
+        "topics",
+        "data"
+      ],
+      "properties": {
+        "emitter": {
+          "oneOf": [
+            {
+              "const": "SELF"
+            },
+            {
+              "$ref": "#/$defs/Address"
+            }
+          ]
+        },
+        "topics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Hex"
+          }
+        },
+        "data": {
+          "$ref": "#/$defs/Hex"
+        }
+      }
+    },
+    "CallRecordWire": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "success",
+        "data",
+        "logs",
+        "stateHash"
+      ],
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/Hex"
+        },
+        "logs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NormLog"
+          }
+        },
+        "stateHash": {
+          "$ref": "#/$defs/Hex"
+        },
+        "stateFields": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "PrecedingCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "function",
+        "calldata",
+        "sender",
+        "value"
+      ],
+      "properties": {
+        "function": {
+          "type": "string"
+        },
+        "calldata": {
+          "$ref": "#/$defs/Hex"
+        },
+        "sender": {
+          "$ref": "#/$defs/Address"
+        },
+        "value": {
+          "$ref": "#/$defs/Wei"
+        }
+      }
+    },
+    "Finding": {
+      "description": "Shrunk (originalLength) xor unshrunk (unshrunk + unshrunkReason); port-bug (legacy, port, differingFields) xor exorcised (none of them).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "function",
+        "classification",
+        "calldata",
+        "sender",
+        "value",
+        "precedingCalls"
+      ],
+      "properties": {
+        "function": {
+          "type": "string"
+        },
+        "classification": {
+          "enum": [
+            "exorcised",
+            "port-bug"
+          ]
+        },
+        "calldata": {
+          "$ref": "#/$defs/Hex"
+        },
+        "sender": {
+          "$ref": "#/$defs/Address"
+        },
+        "value": {
+          "$ref": "#/$defs/Wei"
+        },
+        "precedingCalls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrecedingCall"
+          }
+        },
+        "originalLength": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unshrunk": {
+          "const": true
+        },
+        "unshrunkReason": {
+          "enum": [
+            "witness-not-failed",
+            "replay-mismatch",
+            "witness-cap",
+            "deadline",
+            "setup"
+          ]
+        },
+        "site": {
+          "oneOf": [
+            {
+              "const": "unattributed"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "location"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "location": {
+                  "$ref": "#/$defs/SourceLocation"
+                }
+              }
+            }
+          ]
+        },
+        "legacy": {
+          "$ref": "#/$defs/CallRecordWire"
+        },
+        "port": {
+          "$ref": "#/$defs/CallRecordWire"
+        },
+        "differingFields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "required": [
+                "originalLength"
+              ],
+              "properties": {
+                "originalLength": true,
+                "unshrunk": false,
+                "unshrunkReason": false
+              }
+            },
+            {
+              "required": [
+                "unshrunk",
+                "unshrunkReason"
+              ],
+              "properties": {
+                "unshrunk": true,
+                "unshrunkReason": true,
+                "originalLength": false
+              }
+            }
+          ]
+        },
+        {
+          "if": {
+            "properties": {
+              "classification": {
+                "const": "port-bug"
+              }
+            },
+            "required": [
+              "classification"
+            ]
+          },
+          "then": {
+            "required": [
+              "legacy",
+              "port",
+              "differingFields"
+            ],
+            "properties": {
+              "legacy": true,
+              "port": true,
+              "differingFields": true
+            }
+          },
+          "else": {
+            "properties": {
+              "legacy": false,
+              "port": false,
+              "differingFields": false
+            }
+          }
+        }
+      ]
+    }
+  }
+}

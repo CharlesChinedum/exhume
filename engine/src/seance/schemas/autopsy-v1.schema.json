@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://exhume.dev/schemas/autopsy-v1.schema.json",
+  "title": "Exhume Autopsy report, schema version 1",
+  "description": "Unchecked arithmetic sites of a legacy contract. Whether every `function` names an ABI function is checked by code, not by this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contract",
+    "sites"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1"
+    },
+    "contract": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sites": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ArithmeticSite"
+      }
+    }
+  },
+  "$defs": {
+    "SourceLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "line",
+        "column"
+      ],
+      "properties": {
+        "file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "column": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "UintType": {
+      "enum": [
+        "uint8",
+        "uint16",
+        "uint24",
+        "uint32",
+        "uint40",
+        "uint48",
+        "uint56",
+        "uint64",
+        "uint72",
+        "uint80",
+        "uint88",
+        "uint96",
+        "uint104",
+        "uint112",
+        "uint120",
+        "uint128",
+        "uint136",
+        "uint144",
+        "uint152",
+        "uint160",
+        "uint168",
+        "uint176",
+        "uint184",
+        "uint192",
+        "uint200",
+        "uint208",
+        "uint216",
+        "uint224",
+        "uint232",
+        "uint240",
+        "uint248",
+        "uint256"
+      ]
+    },
+    "Operand": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value",
+            "type"
+          ],
+          "properties": {
+            "kind": {
+              "const": "known"
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$",
+              "description": "Decimal."
+            },
+            "type": {
+              "$ref": "#/$defs/UintType"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name",
+            "type"
+          ],
+          "properties": {
+            "kind": {
+              "const": "param"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "$ref": "#/$defs/UintType"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name",
+            "type"
+          ],
+          "properties": {
+            "kind": {
+              "const": "arrayLength"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "$ref": "#/$defs/UintType"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "type"
+          ],
+          "properties": {
+            "kind": {
+              "const": "unknown"
+            },
+            "type": {
+              "$ref": "#/$defs/UintType"
+            }
+          }
+        }
+      ]
+    },
+    "SitePrecondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "constructor-balance",
+            "approve",
+            "transfer"
+          ]
+        },
+        "hint": {
+          "type": "string"
+        }
+      }
+    },
+    "ArithmeticSite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "function",
+        "operator",
+        "operands",
+        "location"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "function": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operator": {
+          "enum": [
+            "+",
+            "-",
+            "*",
+            "**"
+          ]
+        },
+        "operands": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/Operand"
+            },
+            {
+              "$ref": "#/$defs/Operand"
+            }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "location": {
+          "$ref": "#/$defs/SourceLocation"
+        },
+        "precondition": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SitePrecondition"
+          }
+        }
+      }
+    }
+  }
+}

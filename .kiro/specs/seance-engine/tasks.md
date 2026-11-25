@@ -221,7 +221,7 @@ compilation_restrictions = [
     - _Requirements: 4.8, 7.3, 7.4, 8.8, 11.1, 12.4_
 
 - [ ] 4. Autopsy contract and schemas
-  - [ ] 4.1 Write the JSON schemas
+  - [x] 4.1 Write the JSON schemas
     - Create `schemas/autopsy-v1.schema.json` and `schemas/seance-report.schema.json`. The report schema requires `runs`, `depth`, `totalCalls`, `counts`, the `shrinking` object with its seven fields, and `unshrunk` plus `unshrunkReason` on unshrunk findings.
     - _Requirements: 7.8, 7.12, 11.1, 11.5_
 

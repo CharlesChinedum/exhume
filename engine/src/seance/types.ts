@@ -63,14 +63,64 @@ export function isSeanceErrorCode(v: unknown): v is SeanceErrorCode {
 
 export type ClassificationCounts = Record<Classification, number>;
 
-export interface SeanceError {
-  code: SeanceErrorCode;
+interface SeanceErrorBase {
   message: string;
   details?: unknown;
-  /** Set on TIMEOUT only; TIMEOUT is raised only for build and discovery. */
-  phase?: TimeoutPhase;
-  /** TIMEOUT with phase "discovery" and HANDLER_FAULT only; never with phase "build". */
-  partialCounts?: ClassificationCounts;
+}
+
+/** Codes that carry neither `phase` nor `partialCounts`. */
+export type PlainSeanceErrorCode = Exclude<SeanceErrorCode, "TIMEOUT" | "HANDLER_FAULT">;
+
+/**
+ * Union keyed on `code`. `partialCounts` is optional (as in the design's type
+ * sketch) on TIMEOUT/discovery and HANDLER_FAULT, and excluded everywhere else.
+ */
+export type SeanceError = SeanceErrorBase &
+  (
+    | { code: "TIMEOUT"; phase: "build"; partialCounts?: never }
+    | { code: "TIMEOUT"; phase: "discovery"; partialCounts?: ClassificationCounts }
+    | { code: "HANDLER_FAULT"; phase?: never; partialCounts?: ClassificationCounts }
+    | { code: PlainSeanceErrorCode; phase?: never; partialCounts?: never }
+  );
+
+/** Builds an error for any code without `phase` / `partialCounts`. */
+export function seanceError(code: PlainSeanceErrorCode, message: string, details?: unknown): SeanceError {
+  return details === undefined ? { code, message } : { code, message, details };
+}
+
+/** Builds a TIMEOUT error. `partialCounts` is only accepted for phase "discovery". */
+export function timeoutError(
+  phase: "build",
+  message: string,
+  extra?: { details?: unknown },
+): SeanceError;
+export function timeoutError(
+  phase: "discovery",
+  message: string,
+  extra?: { details?: unknown; partialCounts?: ClassificationCounts },
+): SeanceError;
+export function timeoutError(
+  phase: TimeoutPhase,
+  message: string,
+  extra: { details?: unknown; partialCounts?: ClassificationCounts } = {},
+): SeanceError {
+  const base = { code: "TIMEOUT" as const, message, ...(extra.details !== undefined && { details: extra.details }) };
+  return phase === "build"
+    ? { ...base, phase }
+    : { ...base, phase, ...(extra.partialCounts !== undefined && { partialCounts: extra.partialCounts }) };
+}
+
+/** Builds a HANDLER_FAULT error. */
+export function handlerFaultError(
+  message: string,
+  extra: { details?: unknown; partialCounts?: ClassificationCounts } = {},
+): SeanceError {
+  return {
+    code: "HANDLER_FAULT",
+    message,
+    ...(extra.details !== undefined && { details: extra.details }),
+    ...(extra.partialCounts !== undefined && { partialCounts: extra.partialCounts }),
+  };
 }
 
 export type Result<T, E = SeanceError> = { ok: true; value: T } | { ok: false; error: E };
@@ -121,7 +171,11 @@ export interface AbiFunction {
   name?: string;
   inputs: AbiParam[];
   outputs?: AbiParam[];
+  /** Always set on loaded entries; `loadAbi` derives it from `payable`/`constant` when missing. */
   stateMutability: "pure" | "view" | "nonpayable" | "payable";
+  /** Legacy (pre-0.4.16) raw fields; kept as found, `stateMutability` is authoritative. */
+  constant?: boolean;
+  payable?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +224,11 @@ export type ParamSlot =
 
 /** One atomic choice: all assignments are applied together (1 single, 2 pair). */
 export interface TargetEntry {
+  /**
+   * `value` is a bigint. JSON.stringify throws on bigint, so convert it to a
+   * decimal string (`value.toString(10)`) before any JSON output, including
+   * logs, reports and anything written to disk.
+   */
   assignments: { slot: ParamSlot; value: bigint }[];
 }
 
@@ -263,23 +322,57 @@ export interface PrecedingCall {
   value: string;
 }
 
-export interface Finding {
+interface FindingBase {
   function: string;
-  classification: FindingClassification;
   calldata: string; // hex, deployment calldata
   sender: string;
   value: string; // decimal wei
   precedingCalls: PrecedingCall[];
-  /** Pre-shrink handler-call count; present only on shrunk findings. */
-  originalLength?: number;
-  unshrunk?: true;
-  unshrunkReason?: UnshrunkReason;
   site?: { id: string; location: SourceLocation } | "unattributed";
-  /** Port bugs only. */
-  legacy?: CallRecordWire;
-  /** Port bugs only. */
-  port?: CallRecordWire;
-  differingFields?: string[];
+}
+
+/** Shrunk: carries the pre-shrink handler-call count, no unshrunk markers. */
+export interface ShrunkPart {
+  originalLength: number;
+  unshrunk?: never;
+  unshrunkReason?: never;
+}
+
+/** Reported with its original sequence; always says why. */
+export interface UnshrunkPart {
+  unshrunk: true;
+  unshrunkReason: UnshrunkReason;
+  originalLength?: never;
+}
+
+export interface PortBugPart {
+  classification: "port-bug";
+  legacy: CallRecordWire;
+  port: CallRecordWire;
+  differingFields: string[];
+}
+
+export interface ExorcisedPart {
+  classification: "exorcised";
+  legacy?: never;
+  port?: never;
+  differingFields?: never;
+}
+
+/**
+ * Shrunk xor unshrunk, orthogonally port-bug xor exorcised. Both axes narrow:
+ * on `classification`, and on `unshrunk` (use the guards below).
+ */
+export type Finding = FindingBase & (ShrunkPart | UnshrunkPart) & (PortBugPart | ExorcisedPart);
+
+export type UnshrunkFinding = Extract<Finding, { unshrunk: true }>;
+export type PortBugFinding = Extract<Finding, { classification: "port-bug" }>;
+
+export function isUnshrunkFinding(f: Finding): f is UnshrunkFinding {
+  return f.unshrunk === true;
+}
+export function isPortBugFinding(f: Finding): f is PortBugFinding {
+  return f.classification === "port-bug";
 }
 
 export interface SeanceReport {
