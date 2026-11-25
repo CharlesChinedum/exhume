@@ -134,6 +134,11 @@
         "executionId": "bafa380c-a85a-4bcd-80db-247572dbd5a2",
         "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
         "timestamp": 1795611779947
+      },
+      {
+        "executionId": "be883a4d-a76a-4854-8f87-09720fa64388",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795616874115
       }
     ],
     "1.11 Risk 9: seed determinism of discovery and of a rare witness (native only)": [
@@ -141,6 +146,37 @@
         "executionId": "bafa380c-a85a-4bcd-80db-247572dbd5a2",
         "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
         "timestamp": 1795611780022
+      },
+      {
+        "executionId": "be883a4d-a76a-4854-8f87-09720fa64388",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795616874014
+      }
+    ],
+    "1. Docker integration test: verify the design's Known risks before writing any TypeScript": [
+      {
+        "executionId": "be883a4d-a76a-4854-8f87-09720fa64388",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795616874163
+      }
+    ],
+    "2. Checkpoint - Risk verification gate": [
+      {
+        "executionId": "be883a4d-a76a-4854-8f87-09720fa64388",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795616878648
+      }
+    ],
+    "3.1 Set up the `engine/` package": [
+      {
+        "executionId": "be883a4d-a76a-4854-8f87-09720fa64388",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795616884930
+      },
+      {
+        "executionId": "be883a4d-a76a-4854-8f87-09720fa64388",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795616968272
       }
     ]
   }

@@ -41,6 +41,7 @@ The generator lives in `engine/` and is invoked through a local command-line and
 - **Panic_0x11**: Solidity revert data beginning with selector `0x4e487b71` followed by the ABI-encoded uint256 `0x11`.
 - **Séance_Report**: The JSON document produced by a séance.
 - **Foundry_Shrinking**: Foundry's built-in invariant shrinking of a failing call sequence.
+- **Fuzz_Seed_Note**: The fuzz seed is best effort, because Foundry 1.5.1 does not reproduce an invariant campaign from the fuzz seed, so the stored finding sequences are the reproducible artifact.
 - **Worker**: The `worker/` HTTP service, specified separately, that is a future consumer of the Entry_Point and the environment where `forge` runs.
 - **BEC**: BeautyChain, mainnet address `0xC5d105E63711398aF9bbff092d4B6769C82F793D`, solc 0.4.19, optimizer off.
 - **Setup_Record**: A Call_Record produced during setup (constructor, token-share transfer, or seed call) and marked `idx == -1`.
@@ -176,7 +177,7 @@ The generator lives in `engine/` and is invoked through a local command-line and
 8. THE Séance_Report SHALL validate against a published JSON schema that requires the fields `runs`, `depth`, `totalCalls`, `counts`, the `shrinking` object of criterion 12, and, on each unshrunk finding, `unshrunk` and `unshrunkReason`.
 9. FOR ALL valid Séance_Report objects, serializing, then parsing, then serializing SHALL produce a byte-identical document to the first serialization (round-trip property).
 10. THE Séance_Report SHALL contain Classification counts whose sum equals the total number of calls.
-11. WHEN the same inputs and the same fuzz seed are used in two séances, THE Séance_Engine SHALL produce Séance_Reports with identical Classification counts, total number of calls, and number of runs.
+11. WHEN the same inputs and the same fuzz seed are used in two séances, THE Séance_Engine SHALL produce Séance_Reports with an identical total number of calls and an identical number of runs, where the Classification counts of each Séance_Report satisfy criterion 10.
 12. THE Séance_Report SHALL contain a `shrinking` object with the required fields `witnessCap`, `pairsFound`, `pairsSetup`, `pairsShrunk`, `pairsUnshrunk`, `pairsOverCap`, and `deadlineReached`, where `pairsSetup` is the number of Finding_Pairs reported with Unshrunk_Reason `setup`, `pairsOverCap` is the number reported with `witness-cap`, `pairsUnshrunk` is the number reported with `witness-not-failed`, `replay-mismatch`, or `deadline`, `deadlineReached` is true when the Deadline was reached during the Witness_Phase or the Replay_Phase, and `pairsFound` equals the sum of `pairsSetup`, `pairsShrunk`, `pairsUnshrunk`, and `pairsOverCap`.
 
 ### Requirement 8: Shrinking
@@ -193,6 +194,7 @@ The generator lives in `engine/` and is invoked through a local command-line and
 6. WHEN Fuzz_Record Finding_Pairs exceed the Witness_Cap, THE Séance_Engine SHALL report each Finding_Pair beyond the Witness_Cap with its original sequence, `unshrunk` set to true, and `unshrunkReason` set to `witness-cap`.
 7. IF the Foundry_Shrinking campaign of a Finding_Pair completes without reproducing the finding, THEN THE Séance_Engine SHALL report the original sequence with `unshrunk` set to true and `unshrunkReason` set to `witness-not-failed`.
 8. THE Séance_Engine SHALL assign `unshrunkReason` only from the closed set `setup`, `witness-cap`, `witness-not-failed`, `replay-mismatch`, and `deadline`.
+9. THE Séance_Engine SHALL store with every reported finding the sequence that reproduces it without the fuzz seed, where the stored sequence of a shrunk finding is the shrunk sequence, whose Classification is verified by the replay of criterion 2, and the stored sequence of an unshrunk finding, whatever its Unshrunk_Reason, is the original sequence recorded in the Discovery_Phase Call_Records, whose Classification is the one recorded in the Discovery_Phase and is not verified by replay.
 
 ### Requirement 9: BEC acceptance
 
@@ -258,4 +260,4 @@ The generator lives in `engine/` and is invoked through a local command-line and
 9. IF the Deadline is reached during `forge build`, THEN THE Entry_Point SHALL set the `phase` field of the `TIMEOUT` error to `build` and SHALL include no partial counts in the error.
 10. IF the Deadline is reached during the Discovery_Phase, THEN THE Entry_Point SHALL set the `phase` field of the `TIMEOUT` error to `discovery` and SHALL include in the error the partial counts collected so far for each Classification.
 11. IF the Deadline is reached during the Witness_Phase or the Replay_Phase, THEN THE Entry_Point SHALL stop `forge` within 5 seconds of the Deadline, launch no further `forge` runs, return no `TIMEOUT` error, report every Finding_Pair not yet shrunk and replayed with its original sequence, `unshrunk` set to true, and `unshrunkReason` set to `deadline`, set `deadlineReached` to true, write the Séance_Report, and exit with status 0 when invoked as a command-line program.
-12. WHEN a fuzz seed is supplied, THE Entry_Point SHALL pass the fuzz seed to Foundry unchanged, so that two runs with the same inputs and seed produce Séance_Reports with identical Classification counts.
+12. WHEN a fuzz seed is supplied, THE Entry_Point SHALL pass the fuzz seed to Foundry unchanged and SHALL record the fuzz seed in the Séance_Report, as a best-effort aid only, because Foundry 1.5.1 does not reproduce an invariant campaign from the fuzz seed.

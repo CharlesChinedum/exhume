@@ -1,0 +1,11 @@
+node_modules/
+.DS_Store
+*.tsbuildinfo
+
+# Foundry build output
+out/
+cache/
+broadcast/
+
+# Séance risk-run caches
+engine/test/docker/.cache/
