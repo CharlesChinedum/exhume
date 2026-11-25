@@ -30,68 +30,164 @@ The design's Known risks section lists eight bullets, not five. Sub-tasks 1.2 to
     - PASS: a handler that appends one line per call inside `invariant_` runs produces a file with `runs * depth` lines (256 x 64 = 16,384 for the fixture settings) followed by exactly one replay of the final run (`depth` identical lines, 64 for the fixture settings), and no permission error. Writes outside `./seance-out` must fail.
     - FAIL consequence: switch recording to the buffered `vm.writeFile` fallback in the design's wall-clock mitigation (2).
     - Findings:
-      - native (forge 1.5.1, macOS arm64): PASS with a design change. `vm.writeLine` works in invariant runs with the scoped `fs_permissions`, and writes outside `./seance-out` are rejected. Observed 16,448 lines for runs=256 depth=64, which is 16,384 plus a post-campaign replay of the final run (64 duplicate lines). A probe with runs=10 depth=5 gave 55 lines (50 + 5).
-      - docker (linux/amd64, forge 1.5.1): PASS with a design change. Same observations as the native run: scoped writes work, writes outside `./seance-out` are rejected, 16,448 lines for runs=256 depth=64, and 55 lines for the runs=10 depth=5 probe.
+      - native (forge 1.5.1, macOS arm64): PASS with a design change (corrected script). `vm.writeLine` works in invariant runs with the scoped `fs_permissions`, with no permission error. 16,448 lines for runs=256 depth=64 = 16,384 campaign lines + one identical 64-line replay of the final run. `idx == 0` starts: 257 (256 + 1 replay); last campaign sequence at line 16,321, trailing replay at line 16,385, first difference: none (identical line for line). All 3 writes outside `./seance-out` (sibling file, `..` traversal, `src/injected.txt`) were rejected, and no file was created outside `./seance-out`. Invariant result: `[PASS] invariant_always_true() (runs: 256, calls: 16384, reverts: 0)`, 1.09 s. An earlier probe with runs=10 depth=5 gave 55 lines (50 + 5).
+      - docker (linux/amd64, forge 1.5.1): PENDING (deferred; Docker Desktop paused). The earlier Docker file `findings/1.2.docker.md` predates the corrected criterion and is stale; it is not a result.
       - Design change: keep `vm.writeLine` and do not switch to buffered `vm.writeFile`. Handler storage resets every run, so a buffer would not remove the duplicate run. The Report_Builder keeps the first `INVARIANT_RUNS` sequences (counted by `idx == 0` starts), verifies that the remaining lines form exactly one sequence identical to the last kept sequence, and fails with `SEANCE_FAILED` naming the first difference otherwise. Affects tasks 9.1, 9.5, and 10.4.
-      - Follow-up: `engine/test/docker/risks/1.2-writeline.sh`, its fixture, and the files `findings/1.2-writeline.native.md`, `findings/1.2.native.md`, and `findings/1.2.docker.md` still apply the original literal criterion (`runs * depth` lines exactly). Update them to the corrected criterion the next time that script is touched.
+      - Follow-up: the script and `findings/1.2.native.md` now apply the corrected criterion (native run recorded above). `findings/1.2.docker.md` and `findings/1.2-writeline.docker.md` are stale until the Docker pass.
     - _Requirements: 3.2, 7.1_
 
   - [x] 1.3 Risk 2: handler storage reverts per invariant run and `setUp` runs once per forge process
     - PASS: a counter in handler storage restarts at its post-`setUp` value at the start of every run (the first call of each run sees `idx == 0`), and a setup-time marker line is written exactly once in the whole process.
     - FAIL consequence: the `idx == 0` sequence boundary and the once-per-process setup records need a different mechanism. Update decisions 4 and 10 in the design.
-    - Findings: _(filled in by 1.10)_
+    - Findings:
+      - native (forge 1.5.1, macOS arm64): PASS. 16,449 lines in `seance-out/records.jsonl`: 1 setup marker (idx == -1, first line, count 1 in the whole process) + 16,384 campaign lines + 64 trailing replay lines. Campaign: 256 sequence starts (`idx == 0`), 0 lines where `idx != position mod 64`, max idx 63, 256 distinct sequences. The trailing 64 lines are one sequence starting at idx 0, byte-identical to the last campaign sequence, with the marker count still 1 and the file not truncated, so the replay did not re-run `setUp`; it ran from restored post-setUp handler storage. `[PASS] invariant_always_true() (runs: 256, calls: 16384, reverts: 0)`, 1.01 s. Design change needed: none (confirms decision 13's trailing replay).
+      - docker (linux/amd64, forge 1.5.1): PENDING (deferred; Docker Desktop paused).
     - _Requirements: 5.4, 5.5_
 
-  - [-] 1.4 Risk 3: `forge test --json` exposes the failed invariant's `counterexample` as a handler-call list
+  - [x] 1.4 Risk 3: `forge test --json` exposes the failed invariant's `counterexample` as a handler-call list
     - Run a failing `invariant_witness` fixture and a passing one with the pinned Foundry version.
     - PASS: the result is found by iterating the `"<file>:<contract>"` keys of the top-level JSON and the `test_results` under each. For the failing run, the calls are in `counterexample.Sequence[1]`, an ordered list where each call has a sender, hex calldata, and call details. `Sequence[0]` is the pre-shrink length, which the parser records as `originalLength`. For the passing run, `counterexample` is `null`, which means no counterexample.
     - Save both JSON outputs from the native run as fixtures at `engine/test/fixtures/forge-json/failing.json` and `passing.json`. The Docker run's JSON is compared with them for shape only (same keys and nesting), not saved as fixtures.
     - Fresh directory per run: forge replays saved failures from `cache/invariant`, so the script must copy the fixture into a fresh scratch directory on every run, native and Docker. The script may include a negative check that reuses a directory and shows the cached failure being replayed.
     - Seed agreement: run the native and the Docker witness fixtures with the same `--fuzz-seed` and compare the shrunk sequences. Record whether they are identical. A mismatch is a finding to list in 1.10, not a task failure. The Docker run is emulated (linux/amd64 on Apple Silicon), which affects timing only and is not a cause to expect different sequences.
     - FAIL consequence: rewrite the `foundry-json.ts` contract in the design to match the real shape.
-    - Findings: _(filled in by 1.10)_
+    - Findings:
+      - native (forge 1.5.1, macOS arm64): PASS with a wording-level design change. Failing run exit 1, passing run exit 0, each stdout a single JSON document. Result is at `.["<file>:<contract>"].test_results["invariant_witness()"]`. Failing: status `Failure`, `counterexample` is an object `{"Sequence": [15, [<call>, <call>]]}`, not a bare list. `Sequence[0]` = 15 (pre-shrink length), `Sequence[1]` has 2 calls (`arm(uint256)` then `fire(uint256)`), each with keys `addr, args, calldata, contract_name, func_name, raw_args, sender, signature`, hex calldata and 20-byte sender. Passing: status `Success`, `counterexample` is JSON `null` (key present). Negative check: reusing a directory replayed the cached failure from `cache/invariant` (identical shrunk calls with a different seed) and `Sequence[0]` became 2 (the shrunk length) and `reason` changed, so a fresh directory per séance is required. Fixtures written to `engine/test/fixtures/forge-json/{failing,passing}.json`. Seed 0x1badc0de; shrunk sequence saved to `findings/1.4.native.sequence.json`.
+      - docker (linux/amd64, forge 1.5.1): PENDING (deferred; Docker Desktop paused). The Docker run compares its shrunk sequence with the native one at the same seed (see Pending Docker runs). `findings/1.4.docker.md` and `findings/1.4-counterexample.docker.md` predate the changed criteria and are stale.
     - _Requirements: 8.1, 8.2_
 
-  - [ ] 1.5 Risk 4: per-file legacy optimizer profile and `vm.deployCode` name resolution
+  - [x] 1.5 Risk 4: per-file legacy optimizer profile and `vm.deployCode` name resolution
     - Build the fixture with `compilation_restrictions` pinning `src/legacy/LegacyToken.sol` to 0.4.19 with the optimizer disabled, and the port in `src/port/PortToken.sol` with the same contract name, with `additional_compiler_profiles` for the optimizer.
     - PASS: one `forge build` produces both artifacts. `vm.deployCode("LegacyToken.sol:Token")` and `vm.deployCode("PortToken.sol:Token")` deploy different runtime code. Repeat with the legacy optimizer enabled at runs 200 and check the legacy runtime code differs from the optimizer-off build.
     - FAIL consequence: change the artifact naming or profile scheme in the design (decision 9, `foundry.toml` section).
-    - Findings: _(filled in by 1.10)_
+    - Findings:
+      - native (forge 1.5.1, macOS arm64): PASS with a design change to the `foundry.toml` scheme. One `forge build` (rc 0) produced both artifacts in all three builds. OFF: legacy compiled with `0.4.19+commit.c4cbbb05`, optimizer `{"enabled":false,"runs":1}`; port `0.8.28+commit.7893614a`, optimizer off. `vm.deployCode("LegacyToken.sol:Token")` and `vm.deployCode("PortToken.sol:Token")` deploy different code (keccak legacy `0xe370a85d...7d1c`, port `0x6a27b612...0b86`), and each equals `vm.getDeployedCode` of its own artifact. ON (`min_optimizer_runs = 200`): legacy optimizer `{"enabled":true,"runs":200}`, port still off, legacy code differs from OFF (`0xc5bc8db6...0e`). BOTH: port optimizer also on; legacy code identical to ON. Restriction keys `settings`, `profile`, `optimizer` were silently ignored (legacy stayed `enabled:false`, rc 0). A top-level `solc = "0.8.28"` with the legacy restriction fails the build (rc 1, no solc matches `^0.4.19, =0.4.19`). Working snippet (exact, from `findings/1.5.native.md`; the `allow_paths` value is the local forge-std checkout):
+```toml
+[profile.default]
+src = "src"
+out = "out"
+allow_paths = ["/Users/chinedum/Desktop/my_projects/personal_projects/web3/exhume/engine/test/docker/.cache/forge-std"]
+fs_permissions = [{ access = "read", path = "./out" }, { access = "read-write", path = "./seance-out" }]
+optimizer = false
+optimizer_runs = 1
+
+additional_compiler_profiles = [{ name = "legacy_opt", optimizer = true, optimizer_runs = 200 }]
+compilation_restrictions = [
+  { paths = "src/legacy/LegacyToken.sol", version = "=0.4.19", min_optimizer_runs = 200 },
+  { paths = "src/port/PortToken.sol", version = "=0.8.28" },
+]
+```
+      - docker (linux/amd64, forge 1.5.1): PENDING (deferred; Docker Desktop paused).
     - _Requirements: 1.2, 1.3, 1.4, 1.6, 1.7_
 
-  - [ ] 1.6 Risk 5: artifact path layout for the bytecode check
+  - [x] 1.6 Risk 5: artifact path layout for the bytecode check
     - PASS: `out/LegacyToken.sol/Token.json` exists after `forge build` and its `deployedBytecode.object` is readable, and a Metadata_Suffix strip (CBOR length in the last two bytes) of that code equals the stripped on-chain code for the fixture.
     - FAIL consequence: update the artifact path the Runner reads.
-    - Findings: _(filled in by 1.10)_
+    - Findings:
+      - native (forge 1.5.1, macOS arm64): PASS, no path change. `out/LegacyToken.sol/Token.json` exists and `deployedBytecode.object` is readable (0x-prefixed, 1,454 hex chars); `out/PortToken.sol/Token.json` exists. Stripped artifact code equals stripped on-chain code via `vm.deployCode`, `vm.getDeployedCode` and a raw `CREATE` of the creation code (unstripped also equal, since same compile). Suffix: solc 0.4.19 ends `0029` (41), total suffix 43 bytes, starts `a165627a7a72305820` (bzzr0); solc 0.8.28 ends `0033` (51), total suffix 53 bytes, contains `ipfs` and `solc` keys. Negative checks: a changed body byte fails the stripped comparison; a changed metadata-hash byte passes it. `linkReferences` is `{}` and `immutableReferences` is `null` in both artifacts. The Runner reads `deployedBytecode.object`, not `bytecode.object`.
+      - docker (linux/amd64, forge 1.5.1): PENDING (deferred; Docker Desktop paused).
     - _Requirements: 1.8, 1.9_
 
-  - [ ] 1.7 Risk 6: pinned forge-std resolves through `remappings.txt` and `allow_paths`
+  - [x] 1.7 Risk 6: pinned forge-std resolves through `remappings.txt` and `allow_paths`
     - Generate the minimal project with `remappings.txt` containing `forge-std/=/opt/forge-std/src/` and `allow_paths = ["/opt/forge-std"]`, no `lib/` directory, and no network.
     - PASS: `forge build` succeeds offline, and the checkout at `/opt/forge-std` matches `FORGE_STD_PIN`.
     - FAIL consequence: change decision 11 (vendoring scheme).
-    - Findings: _(filled in by 1.10)_
+    - Findings:
+      - native (forge 1.5.1, macOS arm64): PASS, with a generator addition on top of the 1.5 scheme. forge-std HEAD `1eea5bae12ae557d589f9f0f0edae2faa47cb262` equals `v1.9.4^{commit}` (matches `FORGE_STD_PIN` prefix `1eea5bae`), 0 modified files, no `lib/` directory. `forge build --offline` rc 0 and `forge test --offline --match-contract ImportsTest` rc 0 with `remappings.txt` and `allow_paths`; `Test`, `StdInvariant` and `Vm` all compiled with `0.8.28+commit.7893614a`. `--offline` is listed in `forge build --help` ("Do not access the network"), and a build needing the uninstalled `=0.8.31` fails with rc 1, so solc 0.4.19 and 0.8.28 must be pre-installed. A build without `--offline` but with a dead proxy also gave rc 0. Offline is not proven at OS level (no firewall or network namespace natively). Negative check: without `allow_paths`, the build still succeeded (rc 0), so `allow_paths` was not strictly required natively; it stays harmless and in the generated file. Without `remappings.txt` the build fails (rc 1, `forge-std/Test.sol` not found). Native has many 0.8.x installed (0.8.9 to 0.8.37), and forge still picked 0.8.28 for an unrestricted forge-std, but that depends on forge's grouping, so the generator adds explicit restrictions. A probe with `=0.8.30` on the forge-std and `test/**` paths was honoured (forge-std compiled with 0.8.30). Exact snippet (from `findings/1.7.native.md`; paths are the local forge-std checkout):
+```toml
+[profile.default]
+src = "src"
+out = "out"
+allow_paths = ["/Users/chinedum/Desktop/my_projects/personal_projects/web3/exhume/engine/test/docker/.cache/forge-std"]
+fs_permissions = [{ access = "read", path = "./out" }, { access = "read-write", path = "./seance-out" }]
+optimizer = false
+optimizer_runs = 1
+additional_compiler_profiles = [{ name = "legacy_opt", optimizer = true, optimizer_runs = 200 }]
+compilation_restrictions = [
+  { paths = "src/legacy/LegacyToken.sol", version = "=0.4.19", min_optimizer_runs = 200 },
+  { paths = "src/port/PortToken.sol", version = "=0.8.28" },
+  { paths = "/Users/chinedum/Desktop/my_projects/personal_projects/web3/exhume/engine/test/docker/.cache/forge-std/src/**", version = "=0.8.28" },
+  { paths = "test/**", version = "=0.8.28" },
+]
+```
+        with `remappings.txt` containing `forge-std/=/Users/chinedum/Desktop/my_projects/personal_projects/web3/exhume/engine/test/docker/.cache/forge-std/src/`.
+      - docker (linux/amd64, forge 1.5.1): PENDING (deferred; Docker Desktop paused). In Docker only solc 0.4.19 and 0.8.28 are installed and forge-std is at `/opt/forge-std`.
     - _Requirements: 1.6_
 
-  - [ ] 1.8 Risk 7: wall-clock time of discovery with recording on
+  - [x] 1.8 Risk 7: wall-clock time of discovery with recording on
     - Run a fixture handler with two capped low-level calls, two capped state reads, `vm.recordLogs`, and one `vm.writeLine` per call, at `runs = 256` and `depth = 64`.
     - PASS: record seconds per call and total seconds for both the native run and the Docker run, and the native total is under 150 s (half the 300 s default, leaving room for build, witness, and replay). Record both numbers either way.
     - The Docker timing on Apple Silicon is emulated (linux/amd64 under emulation) and is not representative. Record it, label it as emulated, and do not use it for the PASS decision.
     - FAIL consequence: apply the design's mitigations in order (raise the default timeout for graveyard runs, buffered writes, skip state reads for double reverts, lower `depth`) and update the design.
-    - Findings: _(filled in by 1.10)_
+    - Findings:
+      - native (forge 1.5.1, macOS arm64): PASS. Recording ON: 3.13 s total for runs=256 depth=64 (16,384 calls reported, 0.000191 s per call, 0 reverts), against the 150 s threshold. Recording OFF baseline: 1.21 s (0.000074 s per call). Recording overhead: 1.92 s, 0.000117 s per call. Cold build 0.73 s, warm build 0.12 s (excluded). Record file: 16,448 lines (= 16,384 + 64 replay), 16,106,159 bytes, 257 lines with idx 0; recording OFF created no file. Benchmark is worst case (does not stop after `exorcised`, so all depth lines are written): match=5,124, reason-modernised=68, exorcised=2,686, port-bug=8,570 (port-bug is expected once legacy balances wrap and the benchmark keeps going). The 64-call replay adds about 0.01 s (0.39% of executed calls). No wall-clock mitigation is needed natively.
+      - docker (linux/amd64, forge 1.5.1): PENDING (deferred; Docker Desktop paused). When it runs, its timing will be labelled emulated on Apple Silicon and will not be used for the PASS decision.
     - _Requirements: 12.7, 12.8, 12.10_
 
-  - [ ] 1.9 Risk 8: witness campaign wall-clock time with recording off
+  - [x] 1.9 Risk 8: witness campaign wall-clock time with recording off
     - Run one `invariant_witness` fixture campaign with default shrinking and `SEANCE_RECORD=0`.
     - PASS: record seconds per campaign for both the native run and the Docker run. The native estimate for 10 pairs plus replays fits in the remaining budget after discovery, or the design is updated to say that a deadline there is the expected case.
     - The Docker timing on Apple Silicon is emulated (linux/amd64 under emulation) and is not representative. Record it, label it as emulated, and do not use it for the PASS decision.
     - FAIL consequence: lower the `INVARIANT_RUNS` used by witness campaigns, or document the expected `deadline` outcome in the design.
-    - Findings: _(filled in by 1.10)_
+    - Findings:
+      - native (forge 1.5.1, macOS arm64): PASS. `SEANCE_RECORD=0`, runs=256 depth=64, forge default `shrink_run_limit` 5000. Campaign seconds (build excluded): early (any exorcised `batchTransfer`) 0.11 to 0.17 s, failing after 0 completed runs, shrunk to 1 call; rare (about 6e-4 per call) 0.17 to 0.18 s, failing after 1 to 12 runs, shrunk to 1 call; never (no input satisfies it) 1.25 to 1.27 s, runs all 256, no shrinking. Shrinking took about 0.02 s (early) and about 0.00 s (rare). Forge stops at the first failure. Replay with recording ON: 0.10 to 0.12 s. Estimate for 10 pairs: 10 x 1.27 s + 10 x 0.12 s = 13.90 s against 296.21 s remaining after discovery (3.13 s) and a 0.66 s cold build. It fits, so a deadline in the witness phase is not the expected case natively. Design change needed: none.
+      - Surprise: a fixed `--fuzz-seed 42` did not always give the same campaign. With the shipped conditions, matching default and `shrink_run_limit=0` campaigns needed 1 attempt each, but with an earlier, rarer condition (about 1e-4 per call) one invocation failed at run 33 and the next invocations of the same command passed all 256 runs. Without `--fuzz-seed`, the rare campaign failed at runs 6, 7 and 1.
+      - docker (linux/amd64, forge 1.5.1): PENDING (deferred; Docker Desktop paused). When it runs, its timing will be labelled emulated on Apple Silicon and will not be used for the PASS decision.
     - _Requirements: 8.1, 12.11_
 
-  - [ ] 1.10 Record findings in this file and flag design changes
+  - [-] 1.10 Record findings in this file and flag design changes
     - Copy each sub-task's native result and Docker result into its Findings line above, as two separate entries labelled `native (forge 1.5.1, macOS arm64)` and `docker (linux/amd64, forge 1.5.1)`. For 1.8 and 1.9, include both timings, with the Docker timing labelled as emulated on Apple Silicon.
     - Treat a native/Docker disagreement (one PASS and one FAIL, or different observed values for the same check, other than timings) as a finding. List it with both observed values and the suspected cause.
     - For each FAIL and each disagreement, list the design change needed and which later tasks it affects, and stop to ask the user before continuing past checkpoint 2.
+    - Status: only the native half is recorded. The Docker half is PENDING (deferred by the user's decision; Docker Desktop is paused). 1.10 is NOT fully resolved. Native result: no risk FAILED (1.2 to 1.9 all PASS), but design changes are flagged below, so work stops here for the user's review before checkpoint 2. The design was not edited by this task.
+    - Design changes flagged for review (design.md and requirements.md not edited):
+      - (a) 1.2 / decision 13 (already recorded in the design): `vm.writeLine` works, and the record file ends with one identical replay of the final run (16,448 lines for 256 x 64, 55 for 10 x 5). The native run of the corrected script confirms 16,448 lines, 257 `idx == 0` starts, an identical replay, and 3 rejected outside writes. Affects tasks 9.1, 9.5, and 10.4. 1.3 confirms the replay does not re-run `setUp` (the setup marker count stays 1).
+      - (b) 1.4 / decisions 14 and 15 (already recorded in the design): `counterexample` is an object `{"Sequence": [originalLength, [calls...]]}`, so the parser reads `result.counterexample?.Sequence?.[1] ?? []` and must tolerate other enum variants of forge's `CounterExample` (only `Sequence` was observed). A passing run has `counterexample: null` (key present). Reusing a directory replays the cached failure and changes `Sequence[0]` from 15 to 2 (the shrunk length), so each séance needs a fresh directory.
+      - (c) 1.5 / `foundry.toml` scheme (NOT yet in the design). Profiles are selected through `additional_compiler_profiles = [{ name = "legacy_opt", optimizer = true, optimizer_runs = 200 }]` plus `min_optimizer_runs = 200` in the legacy restriction. The restriction keys `profile`, `settings` and `optimizer` are silently ignored (rc 0, the legacy optimizer stays off). The default profile must set `optimizer = false` and `optimizer_runs = 1`. The port is pinned by its own restriction `{ paths = "src/port/PortToken.sol", version = "=0.8.28" }`, and a top-level `solc = "0.8.28"` breaks the build (rc 1, no solc matches `^0.4.19, =0.4.19`). Decision 9 (artifact names) holds. Needs updating to match: the `foundry.toml` section of design.md (it describes a top-level `solc = "0.8.28"` pin at about line 240, and "a per-file additional compiler profile, omitting `optimizer_runs` when disabled"), decision 12 (it says "an exact port `solc = "0.8.28"`"), Property 2, the project generator task 8.1, and the fixture check in task 8.6. When the legacy optimizer is enabled with runs R, the generator must emit `min_optimizer_runs = R` and a profile with `optimizer_runs = R`; this was only verified with R = 200. The exact snippet from `findings/1.5.native.md`:
+```toml
+[profile.default]
+src = "src"
+out = "out"
+allow_paths = ["/Users/chinedum/Desktop/my_projects/personal_projects/web3/exhume/engine/test/docker/.cache/forge-std"]
+fs_permissions = [{ access = "read", path = "./out" }, { access = "read-write", path = "./seance-out" }]
+optimizer = false
+optimizer_runs = 1
+
+additional_compiler_profiles = [{ name = "legacy_opt", optimizer = true, optimizer_runs = 200 }]
+compilation_restrictions = [
+  { paths = "src/legacy/LegacyToken.sol", version = "=0.4.19", min_optimizer_runs = 200 },
+  { paths = "src/port/PortToken.sol", version = "=0.8.28" },
+]
+```
+      - (d) 1.7 / forge-std (extends (c)). forge-std also needs explicit restrictions `{ paths = "<forge-std dir>/src/**", version = "=0.8.28" }` and `{ paths = "test/**", version = "=0.8.28" }`, so that its solc selection is deterministic: with only the legacy and port entries named, forge chose 0.8.28 for forge-std through its own grouping (natively many 0.8.x versions are installed), which the generator does not control. A probe with `=0.8.30` on both paths was honoured. Decision 11's `remappings.txt` + `allow_paths` scheme works with no `lib/` directory. `allow_paths` was not strictly required natively (the negative check without it still built, rc 0); it stays in the generated file as harmless. Without `remappings.txt` the build fails. Offline is not proven at the OS level: `--offline` exists and an uninstalled solc fails under it, but no firewall or network namespace was used, so the no-network claim rests on `--offline` plus a dead proxy. In Docker only solc 0.4.19 and 0.8.28 are installed, so this must be re-checked there. The `<forge-std dir>` in the generated restriction is the path used for `allow_paths` and the remapping (`/opt/forge-std` in Docker). Affects design.md decision 11 and the `foundry.toml` section, Property 2, and tasks 8.1 and 8.6. The exact snippet from `findings/1.7.native.md` (local checkout paths):
+```toml
+[profile.default]
+src = "src"
+out = "out"
+allow_paths = ["/Users/chinedum/Desktop/my_projects/personal_projects/web3/exhume/engine/test/docker/.cache/forge-std"]
+fs_permissions = [{ access = "read", path = "./out" }, { access = "read-write", path = "./seance-out" }]
+optimizer = false
+optimizer_runs = 1
+additional_compiler_profiles = [{ name = "legacy_opt", optimizer = true, optimizer_runs = 200 }]
+compilation_restrictions = [
+  { paths = "src/legacy/LegacyToken.sol", version = "=0.4.19", min_optimizer_runs = 200 },
+  { paths = "src/port/PortToken.sol", version = "=0.8.28" },
+  { paths = "/Users/chinedum/Desktop/my_projects/personal_projects/web3/exhume/engine/test/docker/.cache/forge-std/src/**", version = "=0.8.28" },
+  { paths = "test/**", version = "=0.8.28" },
+]
+```
+        with `remappings.txt` containing `forge-std/=/Users/chinedum/Desktop/my_projects/personal_projects/web3/exhume/engine/test/docker/.cache/forge-std/src/`.
+      - (e) 1.6 / artifact path: no change. The Runner reads `out/<File>.sol/<Contract>.json` and `deployedBytecode.object` (not `bytecode.object`). Metadata_Suffix lengths are 43 bytes for solc 0.4.19 (last two bytes `0029` = 41, plus 2) and 53 bytes for solc 0.8.28 (`0033` = 51, plus 2). Stripping with the CBOR length in the last two bytes works on both. `immutableReferences` is `null` and `linkReferences` is `{}` for both artifacts.
+      - (f) 1.8 and 1.9 / timings (native, representative). Discovery with recording ON: 3.13 s total (0.000191 s per call, 16,384 calls), recording OFF 1.21 s, against a 150 s threshold. Witness campaigns: early 0.11 to 0.17 s, rare 0.17 to 0.18 s, never (full 256 x 64) 1.25 to 1.27 s, replay 0.10 to 0.12 s, and 13.90 s for 10 pairs plus replays against 296.21 s remaining. No wall-clock mitigation (raise timeout, buffered writes, skip state reads, lower `depth`) is needed natively, and the design does not need to say that a deadline in the witness phase is the expected case. These margins are about 50x and 20x, so even a several-fold slowdown in Docker would still fit. 1.8 caveat: the benchmark deliberately does not set `stopped` after an `exorcised` record (worst case, all `depth` lines written) and writes no setup records. 1.9 shows forge stops at the first failure, so a failing campaign costs only the calls up to the first failing run plus shrinking.
+      - (g) 1.9 / seed determinism (NOT yet in the design or requirements). A fixed `--fuzz-seed 42` did not always reproduce the same campaign. With a rarer condition (about 1e-4 per call) during development, one invocation failed at run 33 and later invocations of the identical command passed all 256 runs. Without `--fuzz-seed` the rare campaign failed after 6, 7 and 1 runs. Impact: (1) Requirement 12.12 ("pass the fuzz seed to Foundry unchanged, so that two runs with the same inputs and seed produce Séance_Reports with identical Classification counts") and Requirement 7.11 ("same inputs and same fuzz seed ... identical Classification counts, total number of calls, and number of runs") may not hold for the discovery phase and for whether a rare witness is found at all; the total number of calls and `runs` hold when the campaign completes. (2) The design's determinism expectation (end of the decisions list, "the same `--fuzz-seed` gives identical shrunk sequences native and Docker") should be treated as unproven, and 1.4's same-seed native versus Docker comparison may legitimately differ. Candidate responses for the user to choose: weaken 7.11 and 12.12 to hold only when the campaign is not affected by forge's non-determinism, restrict them to counts that do not depend on rare witnesses, or find out the cause (for example threading or forge's handling of the seed with `fail_on_revert`) before the requirements are changed. This task changes none of them. Property tests that compare two séances with the same seed (7.11) must not be written as hard equalities until this is resolved.
+      - (h) Other observations from the findings (no design change required, listed for the record). 1.4: the passing and failing contracts used seed `0x1badc0de`; per-call fields `addr`, `args`, `contract_name`, `func_name`, `raw_args`, `signature` exist beyond `sender` and `calldata`; `Sequence[0]` is the pre-shrink length only on a fresh run. 1.5: `runs` is reported in optimizer metadata even when `enabled` is false, and the legacy-off artifact differs from the legacy-on artifact only because of the optimizer (hashes in the 1.5 Findings). 1.9: forge's default `shrink_run_limit` is 5000 (read with `forge config --json`), shrunk witnesses for the test conditions reduced to 1 call, and the reported run count at failure varied between 0 and 12. 1.3: the setup marker appears once in the whole process and the replay starts from restored post-setUp storage (idx back to 0). No native/Docker disagreement can be reported yet, because no Docker result exists.
+    - Pending Docker runs (Docker Desktop paused, all deferred by the user's decision to one pass at the end):
+      - Single command when Docker is unpaused: `engine/test/docker/run-risks.sh`.
+      - Refresh the Docker results for 1.2, 1.3, 1.4 (with the changed criteria: counterexample shape, fresh directory per run, shape-only JSON comparison with the native fixtures), 1.5, 1.6, 1.7, 1.8 and 1.9. The existing `*.docker.md` files for 1.2, 1.3 and 1.4 are stale (they predate the amendments) and are not results.
+      - 1.4 same-seed comparison: the native shrunk sequence is saved at `engine/test/docker/findings/1.4.native.sequence.json` (seed `0x1badc0de`, 2 calls, `arm` then `fire`). The Docker run writes `1.4.docker.sequence.json` and compares the two. A mismatch is a finding, not a failure. Given (g), a mismatch may come from forge's seed non-determinism rather than from the architecture.
+      - Docker timings for 1.8 and 1.9 will be labelled emulated on Apple Silicon (linux/amd64 under emulation) and are not used for the PASS decision.
+      - Checks that need the Docker image specifically: 1.7 with only solc 0.4.19 and 0.8.28 installed and forge-std at `/opt/forge-std`, and the 1.5 scheme with those two solc versions.
+      - The native/Docker disagreement analysis required by this task cannot be completed until the Docker pass has run. After it, the 1.10 Findings need a final update (Docker entries replacing PENDING, disagreements listed with both values and suspected cause), and the user must then confirm the flagged design changes before checkpoint 2.
     - _Requirements: 1.6, 12.8_
 
 - [ ] 2. Checkpoint - Risk verification gate

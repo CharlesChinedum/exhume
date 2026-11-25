@@ -57,6 +57,78 @@
         "executionId": "38c7a155-5d6f-485c-94ac-1d4d268400f5",
         "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
         "timestamp": 1795601694518
+      },
+      {
+        "executionId": "176960d6-792d-419a-8150-4efe8e554fea",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795604886948
+      }
+    ],
+    "1.5 Risk 4: per-file legacy optimizer profile and `vm.deployCode` name resolution": [
+      {
+        "executionId": "176960d6-792d-419a-8150-4efe8e554fea",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795604891902
+      },
+      {
+        "executionId": "176960d6-792d-419a-8150-4efe8e554fea",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795605469322
+      }
+    ],
+    "1.6 Risk 5: artifact path layout for the bytecode check": [
+      {
+        "executionId": "176960d6-792d-419a-8150-4efe8e554fea",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795605473100
+      },
+      {
+        "executionId": "176960d6-792d-419a-8150-4efe8e554fea",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795606173198
+      }
+    ],
+    "1.7 Risk 6: pinned forge-std resolves through `remappings.txt` and `allow_paths`": [
+      {
+        "executionId": "176960d6-792d-419a-8150-4efe8e554fea",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795606178704
+      },
+      {
+        "executionId": "176960d6-792d-419a-8150-4efe8e554fea",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795607692593
+      }
+    ],
+    "1.8 Risk 7: wall-clock time of discovery with recording on": [
+      {
+        "executionId": "176960d6-792d-419a-8150-4efe8e554fea",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795607696368
+      },
+      {
+        "executionId": "176960d6-792d-419a-8150-4efe8e554fea",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795608597217
+      }
+    ],
+    "1.9 Risk 8: witness campaign wall-clock time with recording off": [
+      {
+        "executionId": "176960d6-792d-419a-8150-4efe8e554fea",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795608601815
+      },
+      {
+        "executionId": "176960d6-792d-419a-8150-4efe8e554fea",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795609894259
+      }
+    ],
+    "1.10 Record findings in this file and flag design changes": [
+      {
+        "executionId": "176960d6-792d-419a-8150-4efe8e554fea",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795609900037
       }
     ]
   }
