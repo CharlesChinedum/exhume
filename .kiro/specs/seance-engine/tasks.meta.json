@@ -129,6 +129,18 @@
         "executionId": "176960d6-792d-419a-8150-4efe8e554fea",
         "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
         "timestamp": 1795609900037
+      },
+      {
+        "executionId": "bafa380c-a85a-4bcd-80db-247572dbd5a2",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795611779947
+      }
+    ],
+    "1.11 Risk 9: seed determinism of discovery and of a rare witness (native only)": [
+      {
+        "executionId": "bafa380c-a85a-4bcd-80db-247572dbd5a2",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795611780022
       }
     ]
   }

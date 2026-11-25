@@ -135,7 +135,7 @@ compilation_restrictions = [
       - docker (linux/amd64, forge 1.5.1): PENDING (deferred; Docker Desktop paused). When it runs, its timing will be labelled emulated on Apple Silicon and will not be used for the PASS decision.
     - _Requirements: 8.1, 12.11_
 
-  - [-] 1.10 Record findings in this file and flag design changes
+  - [ ] 1.10 Record findings in this file and flag design changes
     - Copy each sub-task's native result and Docker result into its Findings line above, as two separate entries labelled `native (forge 1.5.1, macOS arm64)` and `docker (linux/amd64, forge 1.5.1)`. For 1.8 and 1.9, include both timings, with the Docker timing labelled as emulated on Apple Silicon.
     - Treat a native/Docker disagreement (one PASS and one FAIL, or different observed values for the same check, other than timings) as a finding. List it with both observed values and the suspected cause.
     - For each FAIL and each disagreement, list the design change needed and which later tasks it affects, and stop to ask the user before continuing past checkpoint 2.
@@ -189,6 +189,16 @@ compilation_restrictions = [
       - Checks that need the Docker image specifically: 1.7 with only solc 0.4.19 and 0.8.28 installed and forge-std at `/opt/forge-std`, and the 1.5 scheme with those two solc versions.
       - The native/Docker disagreement analysis required by this task cannot be completed until the Docker pass has run. After it, the 1.10 Findings need a final update (Docker entries replacing PENDING, disagreements listed with both values and suspected cause), and the user must then confirm the flagged design changes before checkpoint 2.
     - _Requirements: 1.6, 12.8_
+
+  - [-] 1.11 Risk 9: seed determinism of discovery and of a rare witness (native only)
+    - Depends on 1.8 and 1.9. A runnable script under `engine/test/docker/risks/` (like 1.2 to 1.9), exits non-zero on failure, and writes its result to `engine/test/docker/findings/1.11.native.md`. Native only (forge 1.5.1, macOS arm64).
+    - Part 1, discovery. Use the 1.8 campaign (`engine/test/docker/risks/1.8-wallclock/Bench.t.sol`, recording on). Run it 5 times with `--fuzz-seed 42`, each in a fresh scratch directory. For each run record the sha256 of the record file and the class counts (match, reason-modernised, exorcised, port-bug).
+    - PASS for part 1: all 5 hashes and all 5 count sets are identical. Otherwise the finding is "discovery not seed-deterministic". Record both results and stop for user review.
+    - Part 2, rare witness. Read `engine/test/docker/findings/1.9.native.md` and the 1.9 fixture. Use the first, rarer condition from 1.9 (about 1e-4 per call: exorcised `batchTransfer` by a specific actor pair with a specific receiver pattern). Run it 5 times with the same `--fuzz-seed 42`, each in a fresh scratch directory. For each run record the run number at which it failed, or "passed" (all 256 runs passed).
+    - Record the five outcomes of each part, whatever they are. A varying part 2 is a finding, not a script failure.
+    - The Docker run of this risk is part of the final Docker pass and is deferred with the other Docker runs.
+    - Findings: _(filled in by 1.10 follow-up)_
+    - _Requirements: 7.11, 12.12_
 
 - [ ] 2. Checkpoint - Risk verification gate
   - Ensure every Known risk is PASS in the native run and the Docker run, or that each FAIL and each native/Docker disagreement has an agreed design change. Ask the user if questions arise.
@@ -287,7 +297,15 @@ compilation_restrictions = [
 
 - [ ] 8. Project generator and Solidity templates
   - [ ] 8.1 Implement `forge-std-pin.ts` and `foundry-config.ts`
-    - Export `FORGE_STD_PIN`, `INVARIANT_RUNS = 256`, `INVARIANT_DEPTH = 64`, the `remappings.txt` text, and the `allow_paths` text. `foundry-config.ts` renders `foundry.toml` (port solc 0.8.x, `compilation_restrictions` for legacy files, legacy optimizer profile, `fs_permissions`, `gas_limit`, `[invariant]`). Adjust to any change recorded by task 1.
+    - Export `FORGE_STD_PIN`, `INVARIANT_RUNS = 256`, `INVARIANT_DEPTH = 64`, the `remappings.txt` text, and the `allow_paths` text. `foundry-config.ts` renders `foundry.toml` (`compilation_restrictions`, legacy optimizer profile, `fs_permissions`, `gas_limit`, `[invariant]`). Adjust to any change recorded by task 1.
+    - `FORGE_STD_DIR` is a generator parameter, default `/opt/forge-std` (the Docker image path). Generated files contain the parameter value and never a local checkout path.
+    - Emit the scheme verified by risks 1.5 and 1.7:
+      - `remappings.txt` contains `forge-std/=<FORGE_STD_DIR>/src/`, and `foundry.toml` has `allow_paths = ["<FORGE_STD_DIR>"]`.
+      - The default profile sets `optimizer = false` and `optimizer_runs = r0`, where r0 differs from the legacy runs R, per the design's rule (use 1, or 2 when R == 1).
+      - No top-level `solc`. The port is pinned by its own restriction `{ paths = "src/port/Port<Name>.sol", version = "=0.8.28" }`.
+      - Explicit restrictions `{ paths = "<FORGE_STD_DIR>/src/**", version = "=0.8.28" }` and `{ paths = "test/**", version = "=0.8.28" }`.
+      - When the legacy optimizer is enabled with runs R, emit `additional_compiler_profiles = [{ name = "legacy_opt", optimizer = true, optimizer_runs = R }]` and put `min_optimizer_runs = R` on the legacy restriction. When it is disabled, emit neither the additional profile nor `min_optimizer_runs`.
+      - Never emit the `profile`, `settings`, or `optimizer` keys in a restriction. Forge silently ignores them (finding 1.5).
     - _Requirements: 1.2, 1.3, 1.4, 1.5_
 
   - [ ] 8.2 Write `templates/Classifier.sol`
@@ -313,6 +331,13 @@ compilation_restrictions = [
     - Add a `foundry.toml` fixture check to Property 2. For every generated project, parse the `compilation_restrictions` entries from the emitted `foundry.toml` and assert that each legacy restriction's version is exactly `=<legacy version>` (for example `=0.4.19`), with the leading `=` and no range operators, and that the port solc is an exact 0.8.x version (`0.8.<patch>`, no `^`, `~`, `>=`, or range). A bare version such as `0.4.19` in `compilation_restrictions` fails the check.
     - Add a negative fixture: a stored `foundry.toml` whose legacy restriction is a bare `0.4.19`. The check must reject it. A second negative test passes a legacy version to the renderer from task 8.1 and asserts the output never contains a bare `0.4.19` restriction, so the generator cannot emit one.
     - Run the check natively with forge 1.5.1 on the generated fixture project too: `forge build` must resolve the legacy file to solc 0.4.19 with the `=0.4.19` form.
+    - Add these fixture checks, asserting on the parsed TOML:
+      - (1) With R = 1 and the legacy optimizer enabled, the default profile's `optimizer_runs` differs from R, and the legacy restriction's `min_optimizer_runs` matches only the `legacy_opt` additional profile.
+      - (2) There is no top-level `solc`.
+      - (3) No restriction contains a `profile`, `settings`, or `optimizer` key.
+      - (4) The `<FORGE_STD_DIR>/src/**` and `test/**` restrictions (both `=0.8.28`) are present.
+      - (5) Generate with two different `FORGE_STD_DIR` values. In each output, `remappings.txt`, `allow_paths`, and the forge-std restriction contain that value, and no generated file contains a local checkout path or the other value.
+      - (6) With the legacy optimizer disabled, there is no `additional_compiler_profiles` entry and no `min_optimizer_runs`.
     - _Requirements: 1.3, 1.4_
 
   - [ ]* 8.7 Write property tests for handler coverage and target-only fuzzing
@@ -500,7 +525,7 @@ compilation_restrictions = [
   "waves": [
     { "id": 0, "tasks": ["1.1"] },
     { "id": 1, "tasks": ["1.2", "1.3", "1.4", "1.5", "1.6", "1.7", "1.8", "1.9"] },
-    { "id": 2, "tasks": ["1.10"] },
+    { "id": 2, "tasks": ["1.10", "1.11"] },
     { "id": 3, "tasks": ["2"] },
     { "id": 4, "tasks": ["3.1"] },
     { "id": 5, "tasks": ["3.2"] },
