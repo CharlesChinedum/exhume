@@ -1,0 +1,10 @@
+# allow_paths and remappings.txt are added by the harness (native and Docker
+# differ in where forge-std lives).
+[profile.default]
+src = "src"
+out = "out"
+optimizer = false
+compilation_restrictions = [
+  { paths = "src/legacy/LegacyToken.sol", version = "=0.4.19", optimizer = false },
+  { paths = "src/port/PortToken.sol", version = "=0.8.28" },
+]

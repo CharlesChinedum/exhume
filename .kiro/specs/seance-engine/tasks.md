@@ -18,29 +18,36 @@ The design's Known risks section lists eight bullets, not five. Sub-tasks 1.2 to
   - Docker on Apple Silicon runs linux/amd64 under emulation, so Docker timings measured there are not representative. Native timings are the representative ones.
   - _Requirements: 1.6, 3.7, 5.4, 7.11, 8.1, 12.8_
 
-  - [ ] 1.1 Create the native and Docker harnesses and fixtures
+  - [x] 1.1 Create the native and Docker harnesses and fixtures
     - Add `engine/test/docker/Dockerfile` (or reuse the worker image definition if it exists) for linux/amd64 with Foundry pinned to 1.5.1, solc 0.4.19, one solc 0.8.x, and forge-std checked out at `/opt/forge-std` at the version recorded in `FORGE_STD_PIN`. Replace any `latest` or unpinned Foundry install with an install of exactly 1.5.1 (for example `foundryup --install 1.5.1`), and add a build step that fails if `forge --version` does not report 1.5.1.
     - Add `engine/test/docker/run-risks-native.sh`, which checks that the local `forge --version` reports 1.5.1 and runs each risk script natively in a scratch copy of a fixture project. Native runs use a local forge-std checkout at the `FORGE_STD_PIN` version, and the script records its path.
     - Add `engine/test/docker/run-risks.sh`, which builds the image and runs each risk script in a scratch copy of a fixture project.
     - Add a minimal fixture: a 0.4.19 token (`transfer`, `balanceOf`, `batchTransfer` with unchecked `cnt * _value`) and a 0.8 port with the same contract name in a different file.
     - _Requirements: 1.6_
 
-  - [ ] 1.2 Risk 1: `vm.writeLine` inside invariant runs with scoped `fs_permissions`
+  - [x] 1.2 Risk 1: `vm.writeLine` inside invariant runs with scoped `fs_permissions`
     - Use `fs_permissions = [{ access = "read", path = "./out" }, { access = "read-write", path = "./seance-out" }]`.
-    - PASS: a handler that appends one line per call inside `invariant_` runs produces a file with `runs * depth` lines (256 x 64 = 16,384 for the fixture settings) and no permission error. Writing outside `./seance-out` must fail.
+    - PASS: a handler that appends one line per call inside `invariant_` runs produces a file with `runs * depth` lines (256 x 64 = 16,384 for the fixture settings) followed by exactly one replay of the final run (`depth` identical lines, 64 for the fixture settings), and no permission error. Writes outside `./seance-out` must fail.
     - FAIL consequence: switch recording to the buffered `vm.writeFile` fallback in the design's wall-clock mitigation (2).
-    - Findings: _(filled in by 1.10)_
+    - Findings:
+      - native (forge 1.5.1, macOS arm64): PASS with a design change. `vm.writeLine` works in invariant runs with the scoped `fs_permissions`, and writes outside `./seance-out` are rejected. Observed 16,448 lines for runs=256 depth=64, which is 16,384 plus a post-campaign replay of the final run (64 duplicate lines). A probe with runs=10 depth=5 gave 55 lines (50 + 5).
+      - docker (linux/amd64, forge 1.5.1): PASS with a design change. Same observations as the native run: scoped writes work, writes outside `./seance-out` are rejected, 16,448 lines for runs=256 depth=64, and 55 lines for the runs=10 depth=5 probe.
+      - Design change: keep `vm.writeLine` and do not switch to buffered `vm.writeFile`. Handler storage resets every run, so a buffer would not remove the duplicate run. The Report_Builder keeps the first `INVARIANT_RUNS` sequences (counted by `idx == 0` starts), verifies that the remaining lines form exactly one sequence identical to the last kept sequence, and fails with `SEANCE_FAILED` naming the first difference otherwise. Affects tasks 9.1, 9.5, and 10.4.
+      - Follow-up: `engine/test/docker/risks/1.2-writeline.sh`, its fixture, and the files `findings/1.2-writeline.native.md`, `findings/1.2.native.md`, and `findings/1.2.docker.md` still apply the original literal criterion (`runs * depth` lines exactly). Update them to the corrected criterion the next time that script is touched.
     - _Requirements: 3.2, 7.1_
 
-  - [ ] 1.3 Risk 2: handler storage reverts per invariant run and `setUp` runs once per forge process
+  - [x] 1.3 Risk 2: handler storage reverts per invariant run and `setUp` runs once per forge process
     - PASS: a counter in handler storage restarts at its post-`setUp` value at the start of every run (the first call of each run sees `idx == 0`), and a setup-time marker line is written exactly once in the whole process.
     - FAIL consequence: the `idx == 0` sequence boundary and the once-per-process setup records need a different mechanism. Update decisions 4 and 10 in the design.
     - Findings: _(filled in by 1.10)_
     - _Requirements: 5.4, 5.5_
 
-  - [ ] 1.4 Risk 3: `forge test --json` exposes the failed invariant's `counterexample` as a handler-call list
+  - [-] 1.4 Risk 3: `forge test --json` exposes the failed invariant's `counterexample` as a handler-call list
     - Run a failing `invariant_witness` fixture and a passing one with the pinned Foundry version.
-    - PASS: the failing run's JSON contains an ordered list of calls with hex calldata and sender, and the passing run contains none. Save both JSON outputs as fixtures at `engine/test/fixtures/forge-json/failing.json` and `passing.json`.
+    - PASS: the result is found by iterating the `"<file>:<contract>"` keys of the top-level JSON and the `test_results` under each. For the failing run, the calls are in `counterexample.Sequence[1]`, an ordered list where each call has a sender, hex calldata, and call details. `Sequence[0]` is the pre-shrink length, which the parser records as `originalLength`. For the passing run, `counterexample` is `null`, which means no counterexample.
+    - Save both JSON outputs from the native run as fixtures at `engine/test/fixtures/forge-json/failing.json` and `passing.json`. The Docker run's JSON is compared with them for shape only (same keys and nesting), not saved as fixtures.
+    - Fresh directory per run: forge replays saved failures from `cache/invariant`, so the script must copy the fixture into a fresh scratch directory on every run, native and Docker. The script may include a negative check that reuses a directory and shows the cached failure being replayed.
+    - Seed agreement: run the native and the Docker witness fixtures with the same `--fuzz-seed` and compare the shrunk sequences. Record whether they are identical. A mismatch is a finding to list in 1.10, not a task failure. The Docker run is emulated (linux/amd64 on Apple Silicon), which affects timing only and is not a cause to expect different sequences.
     - FAIL consequence: rewrite the `foundry-json.ts` contract in the design to match the real shape.
     - Findings: _(filled in by 1.10)_
     - _Requirements: 8.1, 8.2_
@@ -207,6 +214,10 @@ The design's Known risks section lists eight bullets, not five. Sub-tasks 1.2 to
     - **Property 1: Project generation is deterministic**
     - **Property 2: Generated project layout, foundry.toml, and artifact names**
     - **Validates: Requirements 1.1, 1.2, 1.3, 1.4, 1.5, 1.7, 1.13**
+    - Add a `foundry.toml` fixture check to Property 2. For every generated project, parse the `compilation_restrictions` entries from the emitted `foundry.toml` and assert that each legacy restriction's version is exactly `=<legacy version>` (for example `=0.4.19`), with the leading `=` and no range operators, and that the port solc is an exact 0.8.x version (`0.8.<patch>`, no `^`, `~`, `>=`, or range). A bare version such as `0.4.19` in `compilation_restrictions` fails the check.
+    - Add a negative fixture: a stored `foundry.toml` whose legacy restriction is a bare `0.4.19`. The check must reject it. A second negative test passes a legacy version to the renderer from task 8.1 and asserts the output never contains a bare `0.4.19` restriction, so the generator cannot emit one.
+    - Run the check natively with forge 1.5.1 on the generated fixture project too: `forge build` must resolve the legacy file to solc 0.4.19 with the `=0.4.19` form.
+    - _Requirements: 1.3, 1.4_
 
   - [ ]* 8.7 Write property tests for handler coverage and target-only fuzzing
     - **Property 5: Handler coverage and parameter mapping match the ABI**
@@ -226,6 +237,7 @@ The design's Known risks section lists eight bullets, not five. Sub-tasks 1.2 to
 - [ ] 9. Report builder
   - [ ] 9.1 Implement record parsing, grouping, and counts in `report.ts`
     - `parseRecords` assigns 1-based ordinals from line order, discards a truncated last line, assigns `fuzzOrdinal` only to `idx >= 0`. Group sequences by `idx == 0`, group setup records by `idx == -1`, drop records after an `exorcised` record, record `exorcisedAtIndex`, count all four Classifications including tainted records.
+    - Keep the first `INVARIANT_RUNS` sequences, counted by `idx == 0` starts. Treat any later lines as Foundry's post-campaign replay of the final run. Verify they form exactly one sequence identical to the last kept sequence (calldata, sender, results, flags), and fail with `SEANCE_FAILED` naming the first difference if not. The replay lines are not counted. A discovery run killed by timeout has no replay, so partial counts are unaffected.
     - _Requirements: 5.1, 5.2, 5.3, 5.6, 7.3, 7.10_
 
   - [ ] 9.2 Implement finding selection and dispositions in `report.ts`
@@ -242,6 +254,8 @@ The design's Known risks section lists eight bullets, not five. Sub-tasks 1.2 to
 
   - [ ]* 9.5 Write property test for counts and ordinals
     - **Property 21: Report counts are complete and consistent, ordinals follow line order**
+    - The record-stream generator appends a replay tail (a copy of the last sequence) after the first `INVARIANT_RUNS` sequences, and the test checks that counts and ordinals ignore the tail. Add a tampered-tail case (one changed calldata, sender, result, or flag, or a wrong tail length) that must fail with `SEANCE_FAILED` naming the first difference. Add a no-tail case (timeout-killed discovery) that leaves partial counts unchanged.
+    - Property 21 in `design.md` does not yet describe the replay tail. Update the property text there, and the property name if it changes, before running this task.
     - **Validates: Requirements 7.3, 7.4, 7.7, 7.10, 12.2**
 
   - [ ] 9.6 Write property test for finding selection and fallback
@@ -262,7 +276,9 @@ The design's Known risks section lists eight bullets, not five. Sub-tasks 1.2 to
     - _Requirements: 12.7, 12.12_
 
   - [ ] 10.2 Implement `foundry-json.ts`
-    - `parseCounterexample(json)` returns the ordered handler calls. Use the fixtures saved by task 1.4. Never parse text output.
+    - `parseCounterexample(json)` iterates the `"<file>:<contract>"` keys and their `test_results`, reads the ordered handler calls from `counterexample.Sequence[1]`, keeps `Sequence[0]` as `originalLength`, and treats `counterexample: null` as no counterexample. Never parse text output.
+    - The runner never reuses a project directory. Each séance generates a fresh temp project, because forge replays saved failures from `cache/invariant`.
+    - The unit test uses the saved fixtures `engine/test/fixtures/forge-json/failing.json` and `passing.json` from task 1.4.
     - _Requirements: 8.1, 8.2_
 
   - [ ] 10.3 Implement the solc and bytecode checks
