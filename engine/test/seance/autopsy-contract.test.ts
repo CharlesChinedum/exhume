@@ -132,6 +132,38 @@ describe("parseAutopsyReport", () => {
     expect(error.message).toMatch(/Transfer.*alpha.*zeta/);
   });
 
+  it.each(["constructor", "fallback", "receive"] as const)("rejects a site in the %s with a specific message", (kind) => {
+    const bad = clone(bec);
+    bad.sites[0]!.function = kind;
+    const { details, error } = rejected(JSON.stringify(bad));
+    const msg = `site ${bad.sites[0]!.id} is in the ${kind}, which takes no fuzzable arguments; only ABI functions can be targeted`;
+    expect(error.message).toBe(msg);
+    expect(details.reason).toBe("unknown-functions");
+    expect(details.nonFunctionSites).toEqual([{ siteId: bad.sites[0]!.id, kind, message: msg }]);
+    expect(details.unknownFunctions).toEqual([]);
+  });
+
+  it("reports every non-function site, sorted by site id", () => {
+    const bad = clone(bec);
+    bad.sites[0]!.id = "z";
+    bad.sites[0]!.function = "constructor";
+    bad.sites[1]!.id = "a";
+    bad.sites[1]!.function = "fallback";
+    const { details } = rejected(JSON.stringify(bad));
+    expect(details.nonFunctionSites.map((n: any) => [n.siteId, n.kind])).toEqual([["a", "fallback"], ["z", "constructor"]]);
+  });
+
+  it("reports both lists for a mixed document", () => {
+    const bad = clone(bec);
+    bad.sites[0]!.function = "constructor";
+    bad.sites[1]!.function = "nope";
+    const { details, error } = rejected(JSON.stringify(bad));
+    expect(details.nonFunctionSites).toHaveLength(1);
+    expect(details.unknownFunctions).toEqual([{ function: "nope", siteIds: ["transfer:sub"] }]);
+    expect(error.message).toContain("is in the constructor");
+    expect(error.message).toContain("missing from the legacy ABI: nope");
+  });
+
   it("reports only the version problem when other violations exist too", () => {
     const bad = { ...clone(bec), schemaVersion: "2", contract: "" };
     expect(rejected(JSON.stringify(bad)).details.reason).toBe("schema-version-unsupported");

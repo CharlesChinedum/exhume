@@ -4,12 +4,12 @@
  * `parseAutopsyReport` checks, in this order, and stops at the first failing
  * category: empty, over 10 MB, JSON syntax, `schemaVersion` present,
  * `schemaVersion` supported, JSON-schema violations (all of them, with JSON
- * pointers), unknown ABI functions (all of them). Every failure is an
+ * pointers), ABI cross-check (all unknown functions and all constructor/fallback/receive sites). Every failure is an
  * `AUTOPSY_REJECTED` error whose `details.reason` names the category.
  */
-import { readFileSync } from "node:fs";
 import Ajv2020 from "ajv/dist/2020.js";
 import type { ErrorObject, ValidateFunction } from "ajv/dist/2020.js";
+import schema from "./schemas/autopsy-v1.schema.json" with { type: "json" };
 import {
   err,
   ok,
@@ -44,6 +44,15 @@ export interface SchemaViolation {
   message: string;
 }
 
+export type NonFunctionKind = "constructor" | "fallback" | "receive";
+
+/** A site whose `function` is a reserved name, so it cannot be fuzzed. */
+export interface NonFunctionSite {
+  siteId: string;
+  kind: NonFunctionKind;
+  message: string;
+}
+
 export interface UnknownFunction {
   function: string;
   siteIds: string[];
@@ -58,11 +67,8 @@ function reject(reason: AutopsyRejectReason, message: string, extra: Record<stri
 // ---------------------------------------------------------------------------
 
 function compileValidator(): ValidateFunction {
-  const schema = JSON.parse(
-    readFileSync(new URL("./schemas/autopsy-v1.schema.json", import.meta.url), "utf8"),
-  ) as object;
   const ajv = new Ajv2020.default({ allErrors: true, strict: true, strictRequired: true });
-  return ajv.compile(schema);
+  return ajv.compile(schema as object);
 }
 
 const validate: ValidateFunction = compileValidator();
@@ -150,21 +156,36 @@ export function parseAutopsyReport(text: string, legacyAbi: AbiFunction[]): Resu
   for (const entry of legacyAbi) {
     if (entry.type === "function" && entry.name !== undefined) known.add(entry.name);
   }
+  // Reserved names are rejected whether or not the ABI has a matching entry.
   const unknownMap = new Map<string, string[]>();
+  const nonFunctionSites: NonFunctionSite[] = [];
   for (const site of report.sites) {
-    if (known.has(site.function)) continue;
-    const ids = unknownMap.get(site.function);
-    if (ids === undefined) unknownMap.set(site.function, [site.id]);
+    const fn = site.function;
+    if (fn === "constructor" || fn === "fallback" || fn === "receive") {
+      nonFunctionSites.push({
+        siteId: site.id,
+        kind: fn,
+        message: `site ${site.id} is in the ${fn}, which takes no fuzzable arguments; only ABI functions can be targeted`,
+      });
+      continue;
+    }
+    if (known.has(fn)) continue;
+    const ids = unknownMap.get(fn);
+    if (ids === undefined) unknownMap.set(fn, [site.id]);
     else ids.push(site.id);
   }
-  if (unknownMap.size > 0) {
+  if (unknownMap.size > 0 || nonFunctionSites.length > 0) {
+    nonFunctionSites.sort((x, y) => cmp(x.siteId, y.siteId) || cmp(x.kind, y.kind));
     const unknownFunctions: UnknownFunction[] = [...unknownMap.keys()]
       .sort(cmp)
       .map((fn) => ({ function: fn, siteIds: [...new Set(unknownMap.get(fn))].sort(cmp) }));
-    const names = unknownFunctions.map((u) => u.function).join(", ");
-    return reject("unknown-functions", `Autopsy report names functions missing from the legacy ABI: ${names}`, {
-      unknownFunctions,
-    });
+    const parts = nonFunctionSites.map((n) => n.message);
+    if (unknownFunctions.length > 0) {
+      const names = unknownFunctions.map((u) => u.function).join(", ");
+      parts.push(`Autopsy report names functions missing from the legacy ABI: ${names}`);
+    }
+    // One reason for both lists; the lists are always present in details.
+    return reject("unknown-functions", parts.join("; "), { unknownFunctions, nonFunctionSites });
   }
   return ok(report);
 }

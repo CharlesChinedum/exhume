@@ -1,0 +1,192 @@
+import { describe, expect, it } from "vitest";
+import { classify, classifyConstructors, isPanic0x11, normalizeLogs } from "../../src/seance/classify.js";
+import type { CallRecord, NormLog } from "../../src/seance/types.js";
+
+const PANIC = "0x4e487b71" + "0".repeat(62) + "11";
+const A = "0x" + "aa".repeat(20);
+const B = "0x" + "bb".repeat(20);
+
+const rec = (over: Partial<CallRecord> = {}): CallRecord => ({
+  success: true,
+  data: "0x01",
+  logs: [],
+  state: { balance: "0x00", "allowed(a,b)": "0x05" },
+  ...over,
+});
+const rev = (data: string): CallRecord => rec({ success: false, data, state: {} });
+const log = (over: Partial<NormLog> = {}): NormLog => ({ emitter: "SELF", topics: ["0x01"], data: "0x02", ...over });
+
+describe("isPanic0x11", () => {
+  it("accepts exactly the 36-byte encoding, any hex case", () => {
+    expect(isPanic0x11(PANIC)).toBe(true);
+    expect(isPanic0x11("0x4E487B71" + "0".repeat(62) + "11")).toBe(true);
+  });
+  it("rejects other lengths, selectors, codes, odd length, and non-strings", () => {
+    expect(isPanic0x11(PANIC.slice(0, -2))).toBe(false); // 35 bytes
+    expect(isPanic0x11(PANIC + "00")).toBe(false); // 37 bytes
+    expect(isPanic0x11("0x4e487b72" + "0".repeat(62) + "11")).toBe(false);
+    expect(isPanic0x11("0x4e487b71" + "0".repeat(62) + "12")).toBe(false);
+    expect(isPanic0x11(PANIC + "0")).toBe(false);
+    expect(isPanic0x11("0x")).toBe(false);
+    expect(isPanic0x11(undefined)).toBe(false);
+  });
+});
+
+describe("classify decision table", () => {
+  it("revert/revert identical -> match", () => {
+    expect(classify(rev("0xAB"), rev("0xab"))).toEqual({ classification: "match", invalidRecord: false, differingFields: [] });
+  });
+  it("revert/revert differing -> reason-modernised", () => {
+    expect(classify(rev("0x"), rev(PANIC)).classification).toBe("reason-modernised");
+    expect(classify(rev("0x01"), rev("0x02")).classification).toBe("reason-modernised");
+    expect(classify(rev(PANIC), rev("0x")).classification).toBe("reason-modernised");
+  });
+  it("success/revert Panic(0x11) -> exorcised", () => {
+    expect(classify(rec(), rev(PANIC)).classification).toBe("exorcised");
+    expect(classify(rec(), rev(PANIC.toUpperCase().replace("0X", "0x"))).classification).toBe("exorcised");
+  });
+  it("success/revert with inexact Panic -> port-bug", () => {
+    for (const d of [PANIC.slice(0, -2), PANIC + "00", "0x4e487b72" + "0".repeat(62) + "11", "0x4e487b71" + "0".repeat(62) + "12", "0x"]) {
+      expect(classify(rec(), rev(d))).toEqual({ classification: "port-bug", invalidRecord: false, differingFields: [] });
+    }
+  });
+  it("revert/success -> port-bug", () => {
+    expect(classify(rev("0x"), rec()).classification).toBe("port-bug");
+  });
+  it("success/success equal -> match, ignoring hex case", () => {
+    expect(classify(rec(), rec()).classification).toBe("match");
+    expect(classify(rec({ data: "0xAB" }), rec({ data: "0xab" })).classification).toBe("match");
+  });
+  it("differing return data -> port-bug named returnData", () => {
+    expect(classify(rec(), rec({ data: "0x02" }))).toEqual({
+      classification: "port-bug",
+      invalidRecord: false,
+      differingFields: ["returnData"],
+    });
+  });
+  it("a single differing allowed value is a port-bug naming only that field", () => {
+    const r = classify(rec(), rec({ state: { balance: "0x00", "allowed(a,b)": "0x06" } }));
+    expect(r.classification).toBe("port-bug");
+    expect(r.differingFields).toEqual(["allowed(a,b)"]);
+  });
+  it("differing balance, missing key and extra key are named and sorted", () => {
+    const r = classify(rec({ state: { balance: "0x00", z: "0x01" } }), rec({ state: { balance: "0x01", a: "0x01" } }));
+    expect(r.differingFields).toEqual(["a", "balance", "z"]);
+  });
+  it("reverted pair ignores state and logs", () => {
+    const a = { ...rev("0x01"), logs: [log()], state: { x: "0x01" } };
+    const b = { ...rev("0x01"), logs: [], state: { x: "0x02" } };
+    expect(classify(a, b).classification).toBe("match");
+  });
+});
+
+describe("log comparison", () => {
+  const base = [log(), log({ topics: ["0x0a", "0x0b"], data: "0x" })];
+  const withLogs = (logs: NormLog[]) => rec({ logs });
+  const diff = (other: NormLog[]) => classify(withLogs(base), withLogs(other));
+
+  it("equal logs match, hex case-insensitive", () => {
+    expect(diff([log({ data: "0x02" }), log({ topics: ["0x0A", "0x0B"], data: "0x" })]).classification).toBe("match");
+  });
+  it.each([
+    ["count", [base[0]!]],
+    ["order", [base[1]!, base[0]!]],
+    ["topics", [base[0]!, log({ topics: ["0x0a", "0x0c"], data: "0x" })]],
+    ["data", [base[0]!, log({ topics: ["0x0a", "0x0b"], data: "0x01" })]],
+    ["emitter", [log({ emitter: A }), base[1]!]],
+  ])("differing %s -> port-bug naming logs", (_n, other) => {
+    const r = diff(other as NormLog[]);
+    expect(r.classification).toBe("port-bug");
+    expect(r.differingFields).toEqual(["logs"]);
+  });
+  it("same non-self emitter matches, different non-self emitter does not", () => {
+    expect(classify(withLogs([log({ emitter: A })]), withLogs([log({ emitter: A.toUpperCase().replace("0X", "0x") })])).classification).toBe("match");
+    expect(classify(withLogs([log({ emitter: A })]), withLogs([log({ emitter: B })])).classification).toBe("port-bug");
+  });
+});
+
+describe("normalizeLogs", () => {
+  const LEG = "0x" + "11".repeat(20);
+  const POR = "0x" + "22".repeat(20);
+  const raw = (emitter: string) => [{ emitter, topics: ["0xAB"], data: "0xCD" }];
+
+  it("maps each deployment's own address to SELF so equal logs compare equal", () => {
+    const l = normalizeLogs(raw(LEG), LEG, true);
+    const p = normalizeLogs(raw(POR.toUpperCase().replace("0X", "0x")), POR, true);
+    expect(l).toEqual([{ emitter: "SELF", topics: ["0xab"], data: "0xcd" }]);
+    expect(classify(rec({ logs: l }), rec({ logs: p })).classification).toBe("match");
+  });
+  it("keeps a foreign emitter (lowercased); the other deployment's address is not SELF", () => {
+    const l = normalizeLogs(raw(POR), LEG, true);
+    expect(l[0]!.emitter).toBe(POR);
+    expect(classify(rec({ logs: normalizeLogs(raw(LEG), LEG, true) }), rec({ logs: l })).classification).toBe("port-bug");
+  });
+  it("returns an empty list for a reverted call and does not mutate input", () => {
+    const input = raw(LEG);
+    const copy = structuredClone(input);
+    expect(normalizeLogs(input, LEG, false)).toEqual([]);
+    normalizeLogs(input, LEG, true);
+    expect(input).toEqual(copy);
+  });
+});
+
+describe("malformed records", () => {
+  const bad: [string, unknown][] = [
+    ["undefined", undefined],
+    ["null", null],
+    ["missing success", { data: "0x", logs: [], state: {} }],
+    ["non-boolean success", { ...rec(), success: "true" }],
+    ["missing data", { success: true, logs: [], state: {} }],
+    ["non-hex data", { ...rec(), data: "0xzz" }],
+    ["odd-length data", { ...rec(), data: "0x123" }],
+    ["no 0x prefix", { ...rec(), data: "0102" }],
+    ["missing logs", { success: true, data: "0x", state: {} }],
+    ["bad log", { ...rec(), logs: [{ emitter: "SELF", topics: "0x01", data: "0x" }] }],
+    ["missing state", { success: true, data: "0x", logs: [] }],
+    ["non-hex state value", { ...rec(), state: { balance: 5 } }],
+  ];
+  it.each(bad)("%s -> port-bug with invalidRecord, on either side", (_n, r) => {
+    const expected = { classification: "port-bug", invalidRecord: true, differingFields: [] };
+    expect(classify(r, rec())).toEqual(expected);
+    expect(classify(rec(), r)).toEqual(expected);
+    expect(classify(r, r)).toEqual(expected);
+  });
+});
+
+describe("purity", () => {
+  it("returns equal results twice and leaves inputs unchanged", () => {
+    const a = rec({ logs: [log()] });
+    const b = rec({ data: "0x02", logs: [log({ data: "0x09" })] });
+    const [ac, bc] = [structuredClone(a), structuredClone(b)];
+    expect(classify(a, b)).toEqual(classify(a, b));
+    expect(a).toEqual(ac);
+    expect(b).toEqual(bc);
+  });
+});
+
+describe("classifyConstructors", () => {
+  const ok = { success: true, data: "0x" };
+  const r = (data: string) => ({ success: false, data });
+
+  it("one-sided revert -> port-bug, reports the reverting side's data, ends", () => {
+    expect(classifyConstructors(ok, r("0xAA"))).toEqual({
+      classification: "port-bug", endSeance: true, invalidRecord: false, reverted: { side: "port", data: "0xAA" },
+    });
+    expect(classifyConstructors(r("0xbb"), ok)).toEqual({
+      classification: "port-bug", endSeance: true, invalidRecord: false, reverted: { side: "legacy", data: "0xbb" },
+    });
+  });
+  it("both revert identical -> match and ends", () => {
+    expect(classifyConstructors(r("0xAB"), r("0xab"))).toMatchObject({ classification: "match", endSeance: true });
+  });
+  it("both revert differing (including empty vs non-empty) -> reason-modernised and ends", () => {
+    expect(classifyConstructors(r("0x"), r("0x01"))).toMatchObject({ classification: "reason-modernised", endSeance: true });
+  });
+  it("both succeed -> match and the séance continues", () => {
+    expect(classifyConstructors(ok, ok)).toEqual({ classification: "match", endSeance: false, invalidRecord: false });
+  });
+  it("malformed outcome -> port-bug, invalidRecord, ends", () => {
+    expect(classifyConstructors(undefined, ok)).toEqual({ classification: "port-bug", endSeance: true, invalidRecord: true });
+    expect(classifyConstructors({ success: 1, data: "0x" }, ok).invalidRecord).toBe(true);
+  });
+});

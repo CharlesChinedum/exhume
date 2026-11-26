@@ -1,14 +1,17 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import Ajv2020 from "ajv/dist/2020.js";
+import autopsySchema from "../../src/seance/schemas/autopsy-v1.schema.json" with { type: "json" };
+import reportSchema from "../../src/seance/schemas/seance-report.schema.json" with { type: "json" };
 import type { AutopsyReport, Finding, SeanceReport } from "../../src/seance/types.js";
 
-const load = (name: string): object =>
-  JSON.parse(readFileSync(new URL(`../../src/seance/schemas/${name}`, import.meta.url), "utf8")) as object;
+const schemaByName: Record<string, object> = {
+  "autopsy-v1.schema.json": autopsySchema,
+  "seance-report.schema.json": reportSchema,
+};
 
 const ajv = new Ajv2020.default({ allErrors: true, strict: true, strictRequired: true });
-const validateAutopsy = ajv.compile(load("autopsy-v1.schema.json"));
-const validateReport = ajv.compile(load("seance-report.schema.json"));
+const validateAutopsy = ajv.compile(autopsySchema as object);
+const validateReport = ajv.compile(reportSchema as object);
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 const A = "0x" + "11".repeat(20);
@@ -109,7 +112,7 @@ describe("schema ids", () => {
   const base = "https://github.com/CharlesChinedum/exhume/blob/main/engine/src/seance/schemas/";
   for (const name of ["autopsy-v1.schema.json", "seance-report.schema.json"]) {
     it(`${name} has the expected $id`, () => {
-      const id = (load(name) as { $id: string }).$id;
+      const id = (schemaByName[name] as { $id: string }).$id;
       expect(id).toBe(base + name);
       expect(id.endsWith(name)).toBe(true);
     });

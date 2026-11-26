@@ -229,6 +229,8 @@ compilation_restrictions = [
 
   - [x] 4.2 Implement `autopsy-contract.ts`
     - Implement `parseAutopsyReport` with the check order: empty, over 10 MB, JSON syntax, `schemaVersion` present, supported (`["1"]`), Ajv schema validation with all violations and JSON pointers, then the ABI cross-check naming every unknown function. Implement `serializeAutopsyReport` with canonical key order.
+    - Load the schema with a JSON import attribute: `import schema from "./schemas/autopsy-v1.schema.json" with { type: "json" }`. Do not use `readFileSync`, so loading works after a build and in the worker image.
+    - Reject any site located in the constructor, fallback, or receive function with `site <id> is in the constructor, which takes no fuzzable arguments; only ABI functions can be targeted`.
     - _Requirements: 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8, 11.10_
 
   - [ ]* 4.3 Write property test for the Autopsy round trip
@@ -249,7 +251,7 @@ compilation_restrictions = [
     - **Validates: Requirements 1.12, 12.4, 12.5**
 
 - [ ] 6. Classifier and taint
-  - [ ] 6.1 Implement `classify.ts`
+  - [x] 6.1 Implement `classify.ts`
     - Implement `classify` per the decision table (including the exact 36-byte `Panic(0x11)` check and `invalidRecord` for malformed input), `classifyConstructors`, and log normalisation with the `SELF` emitter sentinel and empty logs for reverted calls.
     - _Requirements: 2.6, 2.7, 3.8, 3.9, 3.10, 3.11, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 4.10_
 
@@ -376,6 +378,7 @@ compilation_restrictions = [
 
   - [ ] 9.3 Implement report construction, validation, and writing in `report.ts`
     - `buildReport` (including `taintedCalls`, `setupCalls`, `sequenceResults`, `shrinking`, `unreachableSites`, site attribution through ParamSlots with the `unattributed` marker, both Call_Records for port bugs), `validateReport`, canonical `serializeReport` and `parseReport`, and `writeReportAtomic` via temp file and rename with `REPORT_WRITE_FAILED`.
+    - `validateReport` loads the report schema with a JSON import attribute: `import reportSchema from "./schemas/seance-report.schema.json" with { type: "json" }`. This is the same pattern as the autopsy schema in 4.2. Do not use `readFileSync`, so loading works after a build and in the worker image.
     - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9, 7.10, 7.12_
 
   - [ ] 9.4 Write property test for exorcism truncation
@@ -461,6 +464,7 @@ compilation_restrictions = [
     - Read the legacy BEC source from the existing `graveyard/bec/` entry (solc 0.4.19, optimizer off). Fetching it (Sourcify first, Etherscan second) is the fetcher's concern and not part of this task. If the `graveyard/bec/` source or metadata is missing, say so and ask the user before continuing.
     - Write `graveyard/bec/port.golden.sol`, a hand-made Solidity 0.8 port of BEC with no logic changes, applying the workspace rewrite rules: SafeMath calls become checked operators (R1), the contract-named constructor becomes `constructor` (R2), `abstract`, `virtual`, and `override` follow real C3 linearization semantics and are not guessed by pattern (R3), arrays in external functions become `calldata` (R4), `constant` functions become `view` (R5), event calls become `emit` (R6), and `function ()` becomes `fallback()` (R7). Keep the contract name `BecToken` as in the legacy source, so artifact names match. Bug fixes come only from 0.8's built-in checks.
     - Write `graveyard/bec/autopsy.json`, listing the unchecked arithmetic sites of the legacy BEC source by hand, including `batchTransfer`'s `cnt * _value` as an `arrayLength` operand times a `param` operand (both uint256, with the `_receivers` array length site), and the other `+`, `-`, and `*` sites in `transfer`, `transferFrom`, and the other functions, each with site id, function, operator, operands with types, and source location. Set `schemaVersion` to `"1"` and conform to `engine/src/seance/schemas/autopsy-v1.schema.json`. Include precondition hints where a site needs a balance or an `approve`.
+    - Note: BEC's constructor arithmetic (constants only) is left out of `autopsy.json` on purpose. Sites in the constructor take no fuzzable arguments, and the parser rejects them with `site <id> is in the constructor, which takes no fuzzable arguments; only ABI functions can be targeted`.
     - Check `autopsy.json` with `parseAutopsyReport` from task 4.2 against the legacy BEC ABI, and check that `port.golden.sol` compiles with solc 0.8.x in `forge build`.
     - Note: the future Resurrection spec will use `graveyard/bec/port.golden.sol` as its expected output. Do not change it later to make the Resurrection output match without a recorded reason.
     - _Requirements: 9.1, 11.1, 11.5, 11.6, 11.8_

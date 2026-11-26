@@ -171,6 +171,10 @@ export function serializeAutopsyReport(r: AutopsyReport): string; // canonical k
 
 Check order, matching Requirement 11: size/empty/JSON parse, then `schemaVersion` present, then supported, then JSON-schema validation (all violations listed with JSON pointers, via Ajv with `allErrors`), then ABI function cross-check (all unknown function names listed). Supported versions: `["1"]`.
 
+Sites that name the constructor, the fallback or receive are rejected with the message `site <id> is in the <constructor|fallback>, which takes no fuzzable arguments; only ABI functions can be targeted`, because only ABI functions can be targeted by fuzz input.
+
+The schema is loaded with a JSON import attribute (`import schema from "./schemas/autopsy-v1.schema.json" with { type: "json" }`) and not by a filesystem read, so it works after a build and in the worker image.
+
 ### Input_Generator (`input-generator.ts`)
 
 Pure, `bigint` based.
@@ -499,7 +503,7 @@ type Operand =
 
 `SourceLocation.line` and `SourceLocation.column` are 1-based, and both schemas set `minimum: 1` for them. A report with `line` or `column` equal to 0 is rejected by schema validation. The same `SourceLocation` shape is used by `Finding.site.location` in the Séance_Report.
 
-The schema files are `engine/src/seance/schemas/autopsy-v1.schema.json` and `engine/src/seance/schemas/seance-report.schema.json`. Each schema's `$id` is `https://github.com/CharlesChinedum/exhume/blob/main/engine/src/seance/schemas/<file>`, where `<file>` is the schema's file name.
+The schema files are `engine/src/seance/schemas/autopsy-v1.schema.json` and `engine/src/seance/schemas/seance-report.schema.json`. Both schemas are loaded with a JSON import attribute (for example `import schema from "./schemas/autopsy-v1.schema.json" with { type: "json" }`) and not by a filesystem read, so schema validation in the autopsy contract and the report builder works after a build and in the worker image. Each schema's `$id` is `https://github.com/CharlesChinedum/exhume/blob/main/engine/src/seance/schemas/<file>`, where `<file>` is the schema's file name.
 
 ### Record line (JSONL, one per call, written by the handler)
 

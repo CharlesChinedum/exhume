@@ -255,6 +255,16 @@
         "executionId": "4b45e70d-7ecf-46ea-8671-ce5b78f32f94",
         "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
         "timestamp": 1795690911143
+      },
+      {
+        "executionId": "c0c6bb17-c1f2-4471-9920-9feef7433ee7",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795691101704
+      },
+      {
+        "executionId": "c0c6bb17-c1f2-4471-9920-9feef7433ee7",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795691182666
       }
     ],
     "4. Autopsy contract and schemas": [
@@ -262,6 +272,18 @@
         "executionId": "4b45e70d-7ecf-46ea-8671-ce5b78f32f94",
         "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
         "timestamp": 1795690911194
+      }
+    ],
+    "6.1 Implement `classify.ts`": [
+      {
+        "executionId": "c0c6bb17-c1f2-4471-9920-9feef7433ee7",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795691188809
+      },
+      {
+        "executionId": "c0c6bb17-c1f2-4471-9920-9feef7433ee7",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795691314024
       }
     ]
   }
