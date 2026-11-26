@@ -301,6 +301,7 @@ export interface RecordLine {
   legacy: CallRecordWire;
   port: CallRecordWire;
   classification: Classification;
+  /** Sorted, unique. Names: `success`, `returnData`, `logs`, `state.<name>`. Empty unless `port-bug` and not `invalidRecord`. */
   differingFields: string[];
   invalidRecord: boolean;
   afterDivergence: boolean; // true on every record after the first port-bug in the same sequence

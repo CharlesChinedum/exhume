@@ -255,7 +255,7 @@ compilation_restrictions = [
     - Implement `classify` per the decision table (including the exact 36-byte `Panic(0x11)` check and `invalidRecord` for malformed input), `classifyConstructors`, and log normalisation with the `SELF` emitter sentinel and empty logs for reverted calls.
     - _Requirements: 2.6, 2.7, 3.8, 3.9, 3.10, 3.11, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 4.10_
 
-  - [ ] 6.2 Create the shared classification vectors
+  - [x] 6.2 Create the shared classification vectors
     - Write `engine/test/vectors/classification.json` covering every row of the decision table, empty versus non-empty revert data, a single differing `allowed` value, and malformed records. A vitest example test runs them against `classify`.
     - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 10.5_
 

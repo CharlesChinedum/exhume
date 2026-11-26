@@ -1,0 +1,2473 @@
+{
+  "version": 1,
+  "notes": "Shared by engine/test/seance/classification-vectors.test.ts and the generated Classifier.sol forge test (vm.parseJson / stdJson). legacy and port use the in-process CallRecord shape: success (boolean), data (0x hex), logs ([{emitter, topics, data}], emitter is 'SELF' or an address), state (object name -> 0x hex value, as in the TS CallRecord). Solidity consumers must enumerate state keys with vm.parseJsonKeys and read each value by its key; keys such as 'allowed(0xA1,0xA2)' contain parentheses and commas, so use the key returned by parseJsonKeys, not a hand-built JSONPath. A null legacy/port, a missing field, or a wrongly typed field stands for a malformed record; Solidity consumers should treat a vector whose record fails to decode as malformed (invalidRecord true, empty differingFields). expect.classification is one of match, reason-modernised, exorcised, port-bug; expect.differingFields is sorted (UTF-16 order) and unique.",
+  "vectors": [
+    {
+      "name": "match/both-succeed-equal",
+      "description": "Decision table: both succeed with equal data, logs and state.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "match",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "match/both-succeed-hex-case-insensitive",
+      "description": "Hex digits compare as bytes, so 0xAB equals 0xab in data and state.",
+      "legacy": {
+        "success": true,
+        "data": "0xAB",
+        "logs": [],
+        "state": {
+          "balance": "0xAB"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0xab",
+        "logs": [],
+        "state": {
+          "balance": "0xab"
+        }
+      },
+      "expect": {
+        "classification": "match",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "match/both-succeed-empty-data",
+      "description": "Both succeed with empty return data.",
+      "legacy": {
+        "success": true,
+        "data": "0x",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "match",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "match/both-succeed-empty-state",
+      "description": "Both succeed with an empty state map and no logs.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "match",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "match/both-succeed-equal-logs",
+      "description": "Equal logs including a SELF emitter, multiple topics and empty data.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          },
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x0a",
+              "0x0b"
+            ],
+            "data": "0x"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          },
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x0a",
+              "0x0b"
+            ],
+            "data": "0x"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "match",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "match/log-hex-case-insensitive",
+      "description": "Log topics and data compare case-insensitively.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0xAB"
+            ],
+            "data": "0xCD"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0xab"
+            ],
+            "data": "0xcd"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "match",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "match/log-same-address-emitter",
+      "description": "A non-SELF emitter matches the identical address, in any hex case.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "match",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "match/log-self-emitter-both-sides",
+      "description": "SELF on both sides is the same emitter (each side's own deployment).",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "match",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "match/both-revert-identical",
+      "description": "Both revert with identical non-empty data.",
+      "legacy": {
+        "success": false,
+        "data": "0x08c379a0",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": false,
+        "data": "0x08c379a0",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "match",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "match/both-revert-empty",
+      "description": "Both revert with empty data.",
+      "legacy": {
+        "success": false,
+        "data": "0x",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": false,
+        "data": "0x",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "match",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "match/both-revert-identical-hex-case",
+      "description": "Revert data equal up to hex case is identical.",
+      "legacy": {
+        "success": false,
+        "data": "0xAB",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": false,
+        "data": "0xab",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "match",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "match/both-revert-panic-identical",
+      "description": "Both revert with Panic(0x11): identical data, so match, not exorcised.",
+      "legacy": {
+        "success": false,
+        "data": "0x4e487b710000000000000000000000000000000000000000000000000000000000000011",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": false,
+        "data": "0x4e487b710000000000000000000000000000000000000000000000000000000000000011",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "match",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "match/reverted-calls-ignore-logs-and-state",
+      "description": "A reverted pair ignores logs and state entirely.",
+      "legacy": {
+        "success": false,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "x": "0x01"
+        }
+      },
+      "port": {
+        "success": false,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "x": "0x02"
+        }
+      },
+      "expect": {
+        "classification": "match",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "reason-modernised/both-revert-differing",
+      "description": "Both revert with different non-empty data.",
+      "legacy": {
+        "success": false,
+        "data": "0x01",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": false,
+        "data": "0x02",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "reason-modernised",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "reason-modernised/legacy-empty-port-nonempty",
+      "description": "Empty versus non-empty revert data, legacy empty.",
+      "legacy": {
+        "success": false,
+        "data": "0x",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": false,
+        "data": "0x01",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "reason-modernised",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "reason-modernised/legacy-nonempty-port-empty",
+      "description": "Empty versus non-empty revert data, port empty.",
+      "legacy": {
+        "success": false,
+        "data": "0x01",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": false,
+        "data": "0x",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "reason-modernised",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "reason-modernised/legacy-empty-port-panic",
+      "description": "Legacy empty revert (old assert/require) versus port Panic(0x11): both revert, so reason-modernised.",
+      "legacy": {
+        "success": false,
+        "data": "0x",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": false,
+        "data": "0x4e487b710000000000000000000000000000000000000000000000000000000000000011",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "reason-modernised",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "reason-modernised/legacy-panic-port-empty",
+      "description": "Legacy Panic(0x11) revert versus empty port revert.",
+      "legacy": {
+        "success": false,
+        "data": "0x4e487b710000000000000000000000000000000000000000000000000000000000000011",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": false,
+        "data": "0x",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "reason-modernised",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "reason-modernised/differ-by-one-byte",
+      "description": "Revert data differing in a single byte.",
+      "legacy": {
+        "success": false,
+        "data": "0x0102030405",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": false,
+        "data": "0x0102030406",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "reason-modernised",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "reason-modernised/differ-by-length",
+      "description": "Revert data where one is a prefix of the other.",
+      "legacy": {
+        "success": false,
+        "data": "0x0102",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": false,
+        "data": "0x010200",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "reason-modernised",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "reason-modernised/ignores-state-and-logs",
+      "description": "Reverted pair with differing data and differing state and logs is still reason-modernised with no fields.",
+      "legacy": {
+        "success": false,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "x": "0x01"
+        }
+      },
+      "port": {
+        "success": false,
+        "data": "0x02",
+        "logs": [],
+        "state": {
+          "x": "0x02"
+        }
+      },
+      "expect": {
+        "classification": "reason-modernised",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "exorcised/legacy-ok-port-panic-0x11",
+      "description": "Legacy succeeds, port reverts with exactly Panic(0x11).",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": false,
+        "data": "0x4e487b710000000000000000000000000000000000000000000000000000000000000011",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "exorcised",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "exorcised/panic-uppercase-hex",
+      "description": "Uppercase hex digits in the Panic encoding are still exact (the 0x prefix stays lowercase).",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": false,
+        "data": "0x4E487B710000000000000000000000000000000000000000000000000000000000000011",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "exorcised",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "exorcised/panic-mixed-case-hex",
+      "description": "Mixed-case hex digits in the Panic encoding.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": false,
+        "data": "0x4e487B710000000000000000000000000000000000000000000000000000000000000011",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "exorcised",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "exorcised/ignores-legacy-logs-and-state",
+      "description": "Exorcised ignores the legacy side's logs, state and return data.",
+      "legacy": {
+        "success": true,
+        "data": "0xdeadbeef",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "x": "0x09"
+        }
+      },
+      "port": {
+        "success": false,
+        "data": "0x4e487b710000000000000000000000000000000000000000000000000000000000000011",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "exorcised",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "exorcised/legacy-empty-return-data",
+      "description": "Legacy succeeds with empty return data, port Panic(0x11).",
+      "legacy": {
+        "success": true,
+        "data": "0x",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": false,
+        "data": "0x4e487b710000000000000000000000000000000000000000000000000000000000000011",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "exorcised",
+        "invalidRecord": false,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "port-bug/panic-35-bytes",
+      "description": "Panic encoding one byte short (35 bytes) is not Panic(0x11).",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": false,
+        "data": "0x4e487b7100000000000000000000000000000000000000000000000000000000000000",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "returnData",
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/panic-37-bytes",
+      "description": "Panic encoding with a trailing byte (37 bytes).",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": false,
+        "data": "0x4e487b71000000000000000000000000000000000000000000000000000000000000001100",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "returnData",
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/panic-wrong-selector",
+      "description": "Selector 4e487b72 instead of 4e487b71.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": false,
+        "data": "0x4e487b720000000000000000000000000000000000000000000000000000000000000011",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "returnData",
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/panic-wrong-code-0x12",
+      "description": "Panic(0x12) (division by zero) is not Panic(0x11).",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": false,
+        "data": "0x4e487b710000000000000000000000000000000000000000000000000000000000000012",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "returnData",
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/panic-selector-only",
+      "description": "Only the 4-byte Panic selector.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": false,
+        "data": "0x4e487b71",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "returnData",
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/port-revert-empty-vs-legacy-data",
+      "description": "Legacy ok with data 0x01, port reverts empty: data differs.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": false,
+        "data": "0x",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "returnData",
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/legacy-ok-port-revert-same-data",
+      "description": "Legacy return data equals port revert data: only success is listed.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": false,
+        "data": "0x01",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/legacy-ok-port-revert-differing-data",
+      "description": "Legacy ok, port reverts with different data: success and returnData.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": false,
+        "data": "0x0001",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "returnData",
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/legacy-ok-port-revert-ignores-logs-state",
+      "description": "One-sided outcomes never list logs or state.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "x": "0x09"
+        }
+      },
+      "port": {
+        "success": false,
+        "data": "0x01",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/legacy-revert-port-ok-same-data",
+      "description": "Legacy revert data equals port return data: only success.",
+      "legacy": {
+        "success": false,
+        "data": "0x01",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/legacy-revert-port-ok-differing-data",
+      "description": "Legacy reverts empty, port returns 0x01: success and returnData.",
+      "legacy": {
+        "success": false,
+        "data": "0x",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "returnData",
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/legacy-revert-port-ok-ignores-logs-state",
+      "description": "Legacy revert, port ok with logs and state: still only success.",
+      "legacy": {
+        "success": false,
+        "data": "0x01",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "x": "0x09"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/legacy-panic-revert-port-ok",
+      "description": "Legacy reverted with a Panic(0x11)-shaped payload and port succeeded: still a port-bug.",
+      "legacy": {
+        "success": false,
+        "data": "0x4e487b710000000000000000000000000000000000000000000000000000000000000011",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "returnData",
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/return-data-differs",
+      "description": "Both succeed, only return data differs.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x02",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "returnData"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/return-data-empty-vs-nonempty",
+      "description": "Both succeed, empty versus non-empty return data.",
+      "legacy": {
+        "success": true,
+        "data": "0x",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "returnData"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/single-allowed-value-differs",
+      "description": "A single differing allowed(owner,spender) value is a port-bug naming only that state key.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x06"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "state.allowed(0xA1,0xA2)"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/balance-differs",
+      "description": "Only the balance state value differs.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x01",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "state.balance"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/state-key-missing-on-port",
+      "description": "A state key present on legacy only is a difference.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "extra": "0x01"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "state.extra"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/state-key-extra-on-port",
+      "description": "A state key present on port only is a difference.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "extra": "0x01"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "state.extra"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/state-fields-sorted",
+      "description": "Several differing state keys come back sorted in UTF-16 code unit order (uppercase before lowercase).",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "b": "0x01",
+          "a": "0x01",
+          "Z": "0x01"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "b": "0x02",
+          "a": "0x02",
+          "Z": "0x02"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "state.Z",
+          "state.a",
+          "state.b"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/state-key-named-returnData",
+      "description": "A state key named returnData is reported as state.returnData, never colliding with returnData.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "returnData": "0x01"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "returnData": "0x02"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "state.returnData"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/state-key-named-logs-and-success",
+      "description": "State keys named logs and success are prefixed.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "logs": "0x01",
+          "success": "0x01"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "logs": "0x02",
+          "success": "0x02"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "state.logs",
+          "state.success"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/data-logs-and-state-together",
+      "description": "Return data, logs and one state key all differ: fixed names and prefixed key, sorted.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x02",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x01",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "logs",
+          "returnData",
+          "state.balance"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/logs-count-differs",
+      "description": "Different number of logs.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          },
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "logs"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/logs-order-differs",
+      "description": "Same logs in a different order.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x01"
+          },
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          },
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x01"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "logs"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/log-topics-differ",
+      "description": "Same log count, differing topic.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x0a",
+              "0x0b"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x0a",
+              "0x0c"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "logs"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/log-topic-count-differs",
+      "description": "Differing topic count.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x0a"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x0a",
+              "0x0b"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "logs"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/log-data-differs",
+      "description": "Differing log data.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x03"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "logs"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/log-emitter-self-vs-address",
+      "description": "SELF on one side and an address on the other differ.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "logs"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/log-emitter-address-vs-self",
+      "description": "An address on legacy and SELF on the port differ.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "logs"
+        ]
+      }
+    },
+    {
+      "name": "port-bug/log-emitter-different-addresses",
+      "description": "Two different non-SELF emitter addresses differ.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "topics": [
+              "0x01"
+            ],
+            "data": "0x02"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": false,
+        "differingFields": [
+          "logs"
+        ]
+      }
+    },
+    {
+      "name": "malformed/legacy-missing-success",
+      "description": "Malformed legacy record (missing-success) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": {
+        "data": "0x",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-non-boolean-success-string",
+      "description": "Malformed legacy record (non-boolean-success-string) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": {
+        "success": "true",
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-non-boolean-success-number",
+      "description": "Malformed legacy record (non-boolean-success-number) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": {
+        "success": 1,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-missing-data",
+      "description": "Malformed legacy record (missing-data) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": {
+        "success": true,
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-unprefixed-data",
+      "description": "Malformed legacy record (unprefixed-data) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": {
+        "success": true,
+        "data": "0102",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-odd-length-data",
+      "description": "Malformed legacy record (odd-length-data) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": {
+        "success": true,
+        "data": "0x123",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-non-hex-data",
+      "description": "Malformed legacy record (non-hex-data) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": {
+        "success": true,
+        "data": "0xzz",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-unprefixed-state-value",
+      "description": "Malformed legacy record (unprefixed-state-value) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "00"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-odd-length-state-value",
+      "description": "Malformed legacy record (odd-length-state-value) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x0"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-non-string-state-value",
+      "description": "Malformed legacy record (non-string-state-value) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": 5
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-unprefixed-log-topic",
+      "description": "Malformed legacy record (unprefixed-log-topic) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [
+              "01"
+            ],
+            "data": "0x"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-odd-length-log-data",
+      "description": "Malformed legacy record (odd-length-log-data) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": [],
+            "data": "0x123"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-log-topics-not-array",
+      "description": "Malformed legacy record (log-topics-not-array) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": "0x01",
+            "data": "0x"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-log-emitter-not-address-or-self",
+      "description": "Malformed legacy record (log-emitter-not-address-or-self) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "self",
+            "topics": [],
+            "data": "0x"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-log-missing-data",
+      "description": "Malformed legacy record (log-missing-data) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": []
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-missing-logs",
+      "description": "Malformed legacy record (missing-logs) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": {
+        "success": true,
+        "data": "0x",
+        "state": {}
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-missing-state",
+      "description": "Malformed legacy record (missing-state) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": {
+        "success": true,
+        "data": "0x",
+        "logs": []
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-null-record",
+      "description": "Malformed legacy record (null-record) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "legacy": null,
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/port-missing-success",
+      "description": "Malformed port record: missing success.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "data": "0x",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/port-unprefixed-data",
+      "description": "Malformed port record: unprefixed data.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0102",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/port-odd-length-data",
+      "description": "Malformed port record: odd-length data.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x123",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/port-bad-log",
+      "description": "Malformed port record: bad log topics.",
+      "legacy": {
+        "success": true,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "port": {
+        "success": true,
+        "data": "0x01",
+        "logs": [
+          {
+            "emitter": "SELF",
+            "topics": "0x01",
+            "data": "0x"
+          }
+        ],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/both-malformed",
+      "description": "Both records malformed.",
+      "legacy": {
+        "data": "0x",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": "true",
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "balance": "0x00",
+          "allowed(0xA1,0xA2)": "0x05"
+        }
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/legacy-malformed-port-revert",
+      "description": "Malformed legacy record against a reverting port: invalid, not exorcised.",
+      "legacy": {
+        "success": true,
+        "data": "0x123",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": false,
+        "data": "0x4e487b710000000000000000000000000000000000000000000000000000000000000011",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/revert-with-unprefixed-data",
+      "description": "A reverted record's data is also strictly validated.",
+      "legacy": {
+        "success": false,
+        "data": "deadbeef",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": false,
+        "data": "deadbeef",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/revert-with-odd-length-data",
+      "description": "Odd-length revert data is malformed even when both sides are identical.",
+      "legacy": {
+        "success": false,
+        "data": "0x123",
+        "logs": [],
+        "state": {}
+      },
+      "port": {
+        "success": false,
+        "data": "0x123",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    },
+    {
+      "name": "malformed/malformed-state-in-reverted-record",
+      "description": "Even a reverted record with a malformed state value is malformed.",
+      "legacy": {
+        "success": false,
+        "data": "0x01",
+        "logs": [],
+        "state": {
+          "x": "1"
+        }
+      },
+      "port": {
+        "success": false,
+        "data": "0x01",
+        "logs": [],
+        "state": {}
+      },
+      "expect": {
+        "classification": "port-bug",
+        "invalidRecord": true,
+        "differingFields": []
+      }
+    }
+  ]
+}

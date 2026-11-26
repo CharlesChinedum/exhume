@@ -47,7 +47,11 @@ describe("classify decision table", () => {
   });
   it("success/revert with inexact Panic -> port-bug", () => {
     for (const d of [PANIC.slice(0, -2), PANIC + "00", "0x4e487b72" + "0".repeat(62) + "11", "0x4e487b71" + "0".repeat(62) + "12", "0x"]) {
-      expect(classify(rec(), rev(d))).toEqual({ classification: "port-bug", invalidRecord: false, differingFields: [] });
+      expect(classify(rec(), rev(d))).toEqual({
+        classification: "port-bug",
+        invalidRecord: false,
+        differingFields: ["returnData", "success"],
+      });
     }
   });
   it("revert/success -> port-bug", () => {
@@ -67,16 +71,56 @@ describe("classify decision table", () => {
   it("a single differing allowed value is a port-bug naming only that field", () => {
     const r = classify(rec(), rec({ state: { balance: "0x00", "allowed(a,b)": "0x06" } }));
     expect(r.classification).toBe("port-bug");
-    expect(r.differingFields).toEqual(["allowed(a,b)"]);
+    expect(r.differingFields).toEqual(["state.allowed(a,b)"]);
   });
   it("differing balance, missing key and extra key are named and sorted", () => {
     const r = classify(rec({ state: { balance: "0x00", z: "0x01" } }), rec({ state: { balance: "0x01", a: "0x01" } }));
-    expect(r.differingFields).toEqual(["a", "balance", "z"]);
+    expect(r.differingFields).toEqual(["state.a", "state.balance", "state.z"]);
   });
   it("reverted pair ignores state and logs", () => {
     const a = { ...rev("0x01"), logs: [log()], state: { x: "0x01" } };
     const b = { ...rev("0x01"), logs: [], state: { x: "0x02" } };
     expect(classify(a, b).classification).toBe("match");
+  });
+});
+
+describe("differingFields for every port-bug shape", () => {
+  it("success/success: data, logs and state together, sorted", () => {
+    const r = classify(
+      rec(),
+      rec({ data: "0x02", logs: [log()], state: { balance: "0x01", "allowed(a,b)": "0x05" } }),
+    );
+    expect(r).toEqual({
+      classification: "port-bug",
+      invalidRecord: false,
+      differingFields: ["logs", "returnData", "state.balance"],
+    });
+  });
+  it("state keys named returnData or logs do not collide with the fixed names", () => {
+    const r = classify(rec({ state: { returnData: "0x01", logs: "0x01" } }), rec({ state: { returnData: "0x02", logs: "0x02" } }));
+    expect(r.differingFields).toEqual(["state.logs", "state.returnData"]);
+    const both = classify(rec({ state: { logs: "0x01" } }), rec({ data: "0x02", logs: [log()], state: { logs: "0x02" } }));
+    expect(both.differingFields).toEqual(["logs", "returnData", "state.logs"]);
+  });
+  it("legacy ok, port non-Panic revert: success, plus returnData when data differs", () => {
+    expect(classify(rec(), rev("0x01")).differingFields).toEqual(["success"]);
+    expect(classify(rec(), rev("0x0001")).differingFields).toEqual(["returnData", "success"]);
+    expect(classify(rec(), rev("0x01")).classification).toBe("port-bug");
+  });
+  it("legacy revert, port ok: success, plus returnData when data differs", () => {
+    expect(classify(rev("0x01"), rec()).differingFields).toEqual(["success"]);
+    expect(classify(rev("0x"), rec()).differingFields).toEqual(["returnData", "success"]);
+    expect(classify(rev("0x"), rec()).classification).toBe("port-bug");
+  });
+  it("one-sided cases ignore logs and state", () => {
+    const ok = rec({ logs: [log()], state: { x: "0x09" } });
+    expect(classify(ok, rev("0x01")).differingFields).toEqual(["success"]);
+    expect(classify(rev("0x01"), ok).differingFields).toEqual(["success"]);
+  });
+  it("match, reason-modernised and exorcised have no fields", () => {
+    expect(classify(rec(), rec()).differingFields).toEqual([]);
+    expect(classify(rev("0x01"), rev("0x02")).differingFields).toEqual([]);
+    expect(classify(rec(), rev(PANIC)).differingFields).toEqual([]);
   });
 });
 
@@ -140,6 +184,10 @@ describe("malformed records", () => {
     ["non-hex data", { ...rec(), data: "0xzz" }],
     ["odd-length data", { ...rec(), data: "0x123" }],
     ["no 0x prefix", { ...rec(), data: "0102" }],
+    ["unprefixed hex state value", { ...rec(), state: { balance: "00" } }],
+    ["odd-length state value", { ...rec(), state: { balance: "0x0" } }],
+    ["unprefixed log topic", { ...rec(), logs: [{ emitter: "SELF", topics: ["01"], data: "0x" }] }],
+    ["odd-length log data", { ...rec(), logs: [{ emitter: "SELF", topics: [], data: "0x123" }] }],
     ["missing logs", { success: true, data: "0x", state: {} }],
     ["bad log", { ...rec(), logs: [{ emitter: "SELF", topics: "0x01", data: "0x" }] }],
     ["missing state", { success: true, data: "0x", logs: [] }],

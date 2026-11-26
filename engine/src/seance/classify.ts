@@ -100,7 +100,12 @@ function validRecord(r: unknown): r is CallRecord {
 export interface ClassifyResult {
   classification: Classification;
   invalidRecord: boolean;
-  /** Sorted (UTF-16 code unit order). Non-empty only for a success/success `port-bug`. */
+  /**
+   * Sorted (UTF-16 code unit order), no duplicates. Non-empty only for a valid `port-bug`.
+   * Names: `success`, `returnData`, `logs`, and `state.<name>` for each differing state key
+   * (the prefix keeps state keys from colliding with the fixed names).
+   * One-sided outcomes list `success`, plus `returnData` when the data differs.
+   */
   differingFields: string[];
 }
 
@@ -125,9 +130,14 @@ function diffState(a: ObservableState, b: ObservableState): string[] {
   for (const k of keys) {
     const inA = Object.hasOwn(a, k);
     const inB = Object.hasOwn(b, k);
-    if (!inA || !inB || !hexEq(a[k]!, b[k]!)) out.push(k);
+    if (!inA || !inB || !hexEq(a[k]!, b[k]!)) out.push(`state.${k}`);
   }
   return out;
+}
+
+/** Fields for a port-bug where exactly one side reverted. No logs or state: a reverted call has neither. */
+function oneSided(legacyData: string, portData: string): string[] {
+  return hexEq(legacyData, portData) ? ["success"] : ["returnData", "success"];
 }
 
 const INVALID: ClassifyResult = { classification: "port-bug", invalidRecord: true, differingFields: [] };
@@ -150,9 +160,10 @@ export function classify(legacy: unknown, port: unknown): ClassifyResult {
     return result(hexEq(legacy.data, port.data) ? "match" : "reason-modernised");
   }
   if (legacy.success && !port.success) {
-    return result(isPanic0x11(port.data) ? "exorcised" : "port-bug");
+    if (isPanic0x11(port.data)) return result("exorcised");
+    return result("port-bug", oneSided(legacy.data, port.data));
   }
-  if (!legacy.success && port.success) return result("port-bug");
+  if (!legacy.success && port.success) return result("port-bug", oneSided(legacy.data, port.data));
 
   // Both succeeded.
   const fields: string[] = [];

@@ -357,6 +357,20 @@ Decision table:
 
 `Panic(0x11)` encoding is `0x4e487b71` followed by the 32-byte word `0x11`, 36 bytes in total.
 
+**Strict hex.** Every hex value in a Call_Record (return or revert data, log topics and data, state values) must be `0x`-prefixed and have an even number of hex digits. A value without the prefix, or with an odd number of digits, makes the record malformed, and the pair is classified `port-bug` with `invalidRecord` set (the same path as a missing or malformed record in the first table row).
+
+**`differingFields` rules.** `differingFields` is filled for every `port-bug` that is not an invalid record, and is empty in every other case:
+
+| Case | `differingFields` |
+|---|---|
+| both succeed, `port-bug` | `returnData` when the return data differs, `logs` when the normalised logs differ, and `state.<key>` for each Observable_State key whose value differs, as applicable |
+| legacy succeeds, port reverts with data other than `Panic(0x11)` | `success`, plus `returnData` when the revert data differs from the legacy return data |
+| legacy reverts, port succeeds | `success`, plus `returnData` when the port's return data differs from the legacy revert data |
+| malformed or missing record (`invalidRecord` true) | empty |
+| `match`, `reason-modernised`, `exorcised` | empty |
+
+State keys are prefixed `state.<name>`, so they cannot collide with the fixed names `success`, `returnData`, and `logs`. The prefix applies only to `differingFields` entries. The state field names in the JSONL record (`stateFields`, see Data Models) stay unprefixed, and `<name>` is the `stateFields` key. The list is sorted in UTF-16 code unit order (the default JavaScript string sort) and has no duplicates. `Classifier.sol` reports the same list in the record's `differingFields`, with the same prefix, order, and rules, and the shared vectors in `engine/test/vectors/classification.json` check the list on both sides.
+
 ### Taint (`taint.ts`)
 
 ```ts
@@ -473,7 +487,7 @@ The generator emits one contract per shrunk sequence, `SeanceReplay<k>` (k = 1..
 `engine/src/seance/acceptance.ts` wraps `runSeance` and checks Requirement 9 and 10 conditions: an exorcism in `batchTransfer`, zero port bugs, first exorcism `fuzzOrdinal` at most 2,000, `_receivers` length 2..20, and replay confirmation. The `batchTransfer` finding must be shrunk and replay-confirmed (not `unshrunk`), which phase ordering supports because exorcised pairs are selected before port-bug pairs and always within the cap of 10 for BEC (setup pairs do not count toward the cap). Every check is a threshold on one campaign (exorcism present, `fuzzOrdinal` at most 2,000, zero port bugs, array length in range), never an exact count, hash, or sequence, because forge 1.5.1 campaigns are not reproducible from a seed (decision 16). The runner does not retry; a flaky result is a Known risk to investigate. A BEC acceptance run whose `batchTransfer` finding is `unshrunk` for any reason, including `deadline`, fails with `ACCEPTANCE_FAILED` naming the reason. It never overwrites `graveyard/bec/seance-report.json` on failure and returns the failing condition. The mutation variants (Planted_Port_Bug, Dropped_Emit_Mutation) are test-only ports produced by string-level edits in test fixtures, and must produce at least one `port-bug`.
 
 - **Planted_Port_Bug** (`transferFrom` allowance not decremented) is not reached by setup, which only calls `transfer`. The finding comes from fuzzing, is shrunk and replay-confirmed, and has at most 3 preceding calls.
-- **Dropped_Emit_Mutation** removes the `Transfer` emit from the port's `transfer` path. It is expected to surface in setup, at the token-share `transfer`. The acceptance check expects a `port-bug` finding for `transfer` with `unshrunkReason: "setup"`, whose differing fields include the Event_Logs, and it reports both Event_Logs lists. It does not expect a shrunk finding. Because the setup `port-bug` taints every fuzz record, the report holds no fuzz findings for this mutation, and the check does not require any.
+- **Dropped_Emit_Mutation** removes the `Transfer` emit from the port's `transfer` path. It is expected to surface in setup, at the token-share `transfer`. The acceptance check expects a `port-bug` finding for `transfer` with `unshrunkReason: "setup"`, whose `differingFields` include `logs`, and it reports both Event_Logs lists. It does not expect a shrunk finding. Because the setup `port-bug` taints every fuzz record, the report holds no fuzz findings for this mutation, and the check does not require any.
 
 ## Data Models
 
@@ -518,7 +532,7 @@ interface RecordLine {
   legacy: CallRecordWire;
   port: CallRecordWire;
   classification: Classification;
-  differingFields: string[];
+  differingFields: string[];     // per the Classifier rules: `success`, `returnData`, `logs`, `state.<key>`; sorted, no duplicates; empty unless port-bug and not invalidRecord
   invalidRecord: boolean;
   afterDivergence: boolean;      // true on every record after the first port-bug in the same sequence
 }
@@ -531,7 +545,7 @@ interface CallRecordWire { success: boolean; data: string; logs: NormLog[]; stat
 interface NormLog { emitter: "SELF" | string; topics: string[]; data: string }
 ```
 
-`stateFields` is written only for records classified `port-bug`, to keep the file small.
+`stateFields` is written only for records classified `port-bug`, to keep the file small. Its keys are the Observable_State field names as the handler writes them, without a prefix. Only the entries of `differingFields` carry the `state.` prefix (`state.<key>` for `stateFields[<key>]`). All hex values in a record must be `0x`-prefixed with an even number of digits, or the record is malformed.
 
 ### Séance_Report
 
@@ -568,7 +582,7 @@ interface Finding {
   site?: { id: string; location: SourceLocation /* line and column 1-based */ } | "unattributed";
   legacy?: CallRecordWire;       // port bugs only
   port?: CallRecordWire;         // port bugs only
-  differingFields?: string[];
+  differingFields?: string[];    // port bugs only; from the record: `success`, `returnData`, `logs`, `state.<key>`; sorted by UTF-16 code unit order, no duplicates, non-empty for every valid port-bug
 }
 ```
 
@@ -622,13 +636,13 @@ Invariants: the four counts sum to `totalCalls`; keys are serialized in a fixed 
 
 ### Property 8: Classification follows the decision table
 
-*For any* pair of well-formed Call_Records, `classify` returns exactly one Classification, equal to the table oracle: both revert with identical data gives `match`; both revert with any differing byte (including empty versus non-empty) gives `reason-modernised`; legacy success and port revert data exactly equal to the 36-byte `Panic(0x11)` encoding gives `exorcised`; legacy success and any other port revert gives `port-bug`; legacy revert and port success gives `port-bug`; both succeed with equal return data, logs, and Observable_State gives `match`; both succeed with any difference (including a single `allowed` value) gives `port-bug` and lists the differing fields.
+*For any* pair of well-formed Call_Records, `classify` returns exactly one Classification, equal to the table oracle: both revert with identical data gives `match`; both revert with any differing byte (including empty versus non-empty) gives `reason-modernised`; legacy success and port revert data exactly equal to the 36-byte `Panic(0x11)` encoding gives `exorcised`; legacy success and any other port revert gives `port-bug`; legacy revert and port success gives `port-bug`; both succeed with equal return data, logs, and Observable_State gives `match`; both succeed with any difference (including a single `allowed` value) gives `port-bug`. `differingFields` follows the Classifier rules: for both-succeed, `returnData`, `logs`, and `state.<key>` for exactly the parts that differ; for a one-sided outcome (legacy success with a non-Panic port revert, or legacy revert with port success), `success` plus `returnData` when the data also differs; empty for `match`, `reason-modernised`, and `exorcised`. The list is sorted in UTF-16 code unit order, has no duplicates, and state keys carry the `state.` prefix. A record with a hex value that is not `0x`-prefixed or has an odd number of digits is malformed (Property 9).
 
 **Validates: Requirements 3.4, 3.8, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 10.5**
 
 ### Property 9: Classification is pure and rejects malformed records
 
-*For any* pair of Call_Records, calling `classify` twice returns equal results and leaves the inputs unmodified. *For any* pair in which a record is missing, malformed, or lacks a success or revert outcome, the result is `port-bug` with `invalidRecord` set.
+*For any* pair of Call_Records, calling `classify` twice returns equal results and leaves the inputs unmodified. *For any* pair in which a record is missing, malformed, or lacks a success or revert outcome, or contains a hex value that is not `0x`-prefixed or has an odd number of digits, the result is `port-bug` with `invalidRecord` set and an empty `differingFields`.
 
 **Validates: Requirements 4.9, 4.10**
 
@@ -795,7 +809,7 @@ If the Foundry run leaves a truncated last line in `records.jsonl` (for example 
 - Acceptance tests assert thresholds only and never exact counts, hashes, or sequences. A result that passes on one attempt and fails on another is flaky and is investigated, not retried (see Known risks).
 - BEC: exorcism in `batchTransfer` with first-exorcism `fuzzOrdinal` at most 2,000 (a threshold; setup records and the replay tail are excluded from the budget), zero port bugs, shrunk calldata with `_receivers` length in 2..20, replay confirms, report stored in `graveyard/bec/` (Requirement 9). The token-share setup effect on BEC's counts is checked here: `setupCalls` equals the actor count minus one plus seed calls.
 - Planted_Port_Bug: at least one `port-bug` (a lower bound, not an exact count) attributed to `transferFrom` with at most 3 preceding calls (Requirement 10.1 to 10.3).
-- Dropped_Emit_Mutation: a `port-bug` finding for `transfer` with `unshrunkReason: "setup"` (it surfaces at the token-share transfer in setup), whose differing field is the Event_Logs, with both Event_Logs lists reported (10.7). The check does not expect a shrunk finding.
+- Dropped_Emit_Mutation: a `port-bug` finding for `transfer` with `unshrunkReason: "setup"` (it surfaces at the token-share transfer in setup), whose `differingFields` include `logs`, with both Event_Logs lists reported (10.7). The check does not expect a shrunk finding.
 - Two runs with the same seed are compared by shape only (7.11): both give `runs == INVARIANT_RUNS`, `totalCalls` at most `setupCalls + INVARIANT_RUNS * INVARIANT_DEPTH`, the same `seed` string in the report, and Classification counts that sum to `totalCalls`. The test never asserts equal Classification counts, record-file hashes, or finding sequences, because forge 1.5.1 does not reproduce a campaign from a seed (decision 16). Every shrunk finding in either run is replay-confirmed by Phase 3. A timeout during `forge build` stops `forge` within 5 s and returns `TIMEOUT` with `phase: "build"` and no partial counts (12.8, 12.9). A timeout during discovery stops `forge` within 5 s and returns `TIMEOUT` with `phase: "discovery"` and partial counts (12.8, 12.10). A deadline during witness or replay stops `forge` within 5 s and still writes a report with `unshrunkReason: "deadline"` for the unfinished pairs. Shrinking and replay behaviour (8.1, 8.2) are checked by the BEC run, and the witness campaign does not fail for an over-cap pair.
 
 **Not covered by property tests, and why:** criteria that depend on real `forge`, solc, or the EVM (Requirements 1.6, 2, 3.1 to 3.7, 5.4, 7.11, 8.1, 8.2, 9, 10.1 to 10.3, 10.7, 12.8 to 12.11 for real process kills) are checked by the forge and integration tests above, because the behaviour is fixed by Foundry's runtime and 100 iterations would add cost without finding more bugs.
@@ -808,6 +822,7 @@ If the Foundry run leaves a truncated last line in `records.jsonl` (for example 
 - Forge replays saved failures from `cache/invariant`, so a reused project directory would return a stale counterexample. The Runner and the future Worker must use a fresh directory per séance (decision 15).
 - **Forge 1.5.1 fuzzer non-determinism (task 1.11, native).** A fixed `--fuzz-seed` does not make an invariant campaign reproducible. Five same-seed (42) discovery runs in fresh directories gave five different record-file hashes and slightly different Classification counts. `--fuzz-seed` and `FOUNDRY_FUZZ_SEED` are accepted but not honoured reproducibly, and no invariant-specific seed setting exists. Two checks outside the repo localised the cause to forge's fuzzer, not the handler and not threading: with `--threads 1`, seeded runs still differ from line 19 of the record file; with `dictionary_weight = 0`, runs match for 97 lines and then differ at line 98, where only the fuzzed actor index differs. A rare witness (probability about 1e-4) failed at run 136 in most same-seed runs but at runs 124 and 109 in others. Consequences: sequences and counts are expected to differ between runs, the Docker comparison is shape-only, and the stored sequences (replay-verified for shrunk findings only) are the reproducible artifact (decision 16). The Foundry version is pinned at 1.5.1, so a later version may change this behaviour. The design does not depend on either outcome.
 - **Acceptance thresholds are probabilistic.** Because the fuzzer is not reproducible, each acceptance check (BEC exorcism within 2,000 fuzz calls, zero port bugs, Planted_Port_Bug found) is a threshold on one campaign and not an exact value. The design has no retry logic, and none is added. For BEC the task 1.8 benchmark saw about 2,700 exorcised calls in 16,384 on every run, so the margin against the 2,000-call threshold is large. An acceptance run that passes on one attempt and fails on another is flaky and should be investigated, not retried until it passes. Check the call-budget measure first (`fuzzOrdinal` of the first exorcism, with setup records and the replay tail excluded), then the Targeted_Value coverage.
+- **Deployment addresses differ, so `address(this)` in data gives false port bugs.** The legacy and port deployments have different addresses. Only the log emitter is normalised to `SELF`. A contract that puts `address(this)` into an event topic or data word, a return value, or an observable state value therefore produces a false `port-bug` on those calls. BEC is not affected. Graveyard contracts must avoid this pattern until it is handled. A future change could normalise the two deployment addresses wherever they appear in data.
 - The per-file legacy optimizer profile is selected by `compilation_restrictions` together with `additional_compiler_profiles`, and `vm.deployCode("Legacy<Name>.sol:<Name>", ...)` resolves the right artifact when the port has the same contract name in a different file.
 - Foundry 1.5.1 reads a bare `compilation_restrictions` version as a caret range (`0.4.19` becomes `^0.4.19` and forge picks 0.4.26), so the generator must write `=<legacy version>` and an exact `=0.8.28` port restriction, and no top-level `solc` (task 1.5 found a top-level `solc` conflicts with the legacy restriction and fails the build).
 - The restriction keys `profile`, `settings`, and `optimizer` are silently ignored by forge 1.5.1 (task 1.5); the generator relies only on `additional_compiler_profiles` plus `min_optimizer_runs`, with the default profile's `optimizer_runs` kept different from the legacy runs value so the restriction cannot also match the default profile.
