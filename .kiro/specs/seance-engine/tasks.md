@@ -286,7 +286,7 @@ compilation_restrictions = [
     - **Validates: Requirements 5.5, 8.4**
 
 - [ ] 7. Targeted-value input generator
-  - [ ] 7.1 Implement `input-generator.ts`
+  - [x] 7.1 Implement `input-generator.ts`
     - Implement `generateTargets` with the rules table (`x * k`, `a + b`, `a - b`, `x * y`, `x ** y`, array length times value), narrower-type widths, ParamSlot computation (`static` and `dynamicArrayLength`), paired assignments in one entry, seed sequences of at most 10 calls, and `unreachable` sites. Cap entries at 64 per site. Use `bigint` throughout.
     - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.10, 6.11, 6.12_
 
@@ -372,6 +372,7 @@ compilation_restrictions = [
   - [ ] 9.1 Implement record parsing, grouping, and counts in `report.ts`
     - `parseRecords` assigns 1-based ordinals from line order, discards a truncated last line, assigns `fuzzOrdinal` only to `idx >= 0`. Group sequences by `idx == 0`, group setup records by `idx == -1`, drop records after an `exorcised` record, record `exorcisedAtIndex`, count all four Classifications including tainted records.
     - Keep the first `INVARIANT_RUNS` sequences, counted by `idx == 0` starts. Treat any later lines as Foundry's post-campaign replay of the final run. Verify they form exactly one sequence identical to the last kept sequence (calldata, sender, results, flags), and fail with `SEANCE_FAILED` naming the first difference if not. The replay lines are not counted. A discovery run killed by timeout has no replay, so partial counts are unaffected.
+    - `parseRecords` rejects a record file with `SEANCE_FAILED`, naming the line (1-based line number of the first offending line), when a fuzz sequence does not start at `idx == 0` or when `idx` within a sequence does not increase by exactly 1. Setup records (`idx == -1`) are exempt from the continuity check. `verifyTaint` from 6.7 stays tolerant on purpose and relies on `parseRecords` having validated the stream.
     - _Requirements: 5.1, 5.2, 5.3, 5.6, 7.3, 7.10_
 
   - [ ] 9.2 Implement finding selection and dispositions in `report.ts`
@@ -390,6 +391,7 @@ compilation_restrictions = [
   - [ ]* 9.5 Write property test for counts and ordinals
     - **Property 21: Report counts are complete and consistent, ordinals follow line order**
     - The record-stream generator appends a replay tail (a copy of the last sequence) after the first `INVARIANT_RUNS` sequences, and the test checks that counts and ordinals ignore the tail. Add a tampered-tail case (one changed calldata, sender, result, or flag, or a wrong tail length) that must fail with `SEANCE_FAILED` naming the first difference. Add a no-tail case (timeout-killed discovery) that leaves partial counts unchanged.
+    - Add idx continuity cases, each rejected with `SEANCE_FAILED` naming the 1-based line number of the first offending line: a dropped line (idx jumps), a skipped idx, and a sequence starting at idx > 0.
     - Property 21 in `design.md` does not yet describe the replay tail. Update the property text there, and the property name if it changes, before running this task.
     - **Validates: Requirements 7.3, 7.4, 7.7, 7.10, 12.2**
 
