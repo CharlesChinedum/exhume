@@ -359,6 +359,10 @@ Decision table:
 
 **Strict hex.** Every hex value in a Call_Record (return or revert data, log topics and data, state values) must be `0x`-prefixed and have an even number of hex digits. A value without the prefix, or with an odd number of digits, makes the record malformed, and the pair is classified `port-bug` with `invalidRecord` set (the same path as a missing or malformed record in the first table row).
 
+**State key presence.** A state key present on only one side counts as differing and is reported as `state.<name>` in `differingFields`, because both sides read the same getters and a missing key can only come from a handler fault.
+
+**State value length.** State values may be any even-length `0x`-prefixed hex, including `0x` and values longer than 32 bytes, because getters like `name()` and `symbol()` return ABI-encoded strings.
+
 **`differingFields` rules.** `differingFields` is filled for every `port-bug` that is not an invalid record, and is empty in every other case:
 
 | Case | `differingFields` |

@@ -276,7 +276,7 @@ compilation_restrictions = [
     - **Property 7: Log normalisation and comparison**
     - **Validates: Requirements 3.9, 3.10, 3.11**
 
-  - [ ] 6.7 Implement `taint.ts`
+  - [x] 6.7 Implement `taint.ts`
     - Implement `computeTaint(sequence, setupDiverged)` and `verifyTaint(records)`, which returns `SEANCE_FAILED` naming the first record whose `afterDivergence` differs from the recomputed value.
     - _Requirements: 5.5, 8.4_
 

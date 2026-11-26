@@ -77,6 +77,27 @@ describe("classify decision table", () => {
     const r = classify(rec({ state: { balance: "0x00", z: "0x01" } }), rec({ state: { balance: "0x01", a: "0x01" } }));
     expect(r.differingFields).toEqual(["state.a", "state.balance", "state.z"]);
   });
+  it("an empty state value 0x equal on both sides is a match", () => {
+    const r = classify(rec({ state: { name: "0x" } }), rec({ state: { name: "0x" } }));
+    expect(r.classification).toBe("match");
+    expect(r.differingFields).toEqual([]);
+  });
+  it("an empty state value differing from a non-empty one is a port-bug on that key", () => {
+    const r = classify(rec({ state: { name: "0x" } }), rec({ state: { name: "0x00" } }));
+    expect(r.classification).toBe("port-bug");
+    expect(r.differingFields).toEqual(["state.name"]);
+  });
+  it("a 96-byte ABI-encoded string differing in one byte is a port-bug", () => {
+    // offset 0x20, length 5, "Token" padded to 32 bytes
+    const abi = (s: string): string =>
+      "0x" + "20".padStart(64, "0") + "05".padStart(64, "0") + Buffer.from(s).toString("hex").padEnd(64, "0");
+    expect(abi("Token")).toHaveLength(2 + 96 * 2);
+    const same = classify(rec({ state: { name: abi("Token") } }), rec({ state: { name: abi("Token").toUpperCase().replace("0X", "0x") } }));
+    expect(same.classification).toBe("match");
+    const r = classify(rec({ state: { name: abi("Token") } }), rec({ state: { name: abi("Tokem") } }));
+    expect(r.classification).toBe("port-bug");
+    expect(r.differingFields).toEqual(["state.name"]);
+  });
   it("reverted pair ignores state and logs", () => {
     const a = { ...rev("0x01"), logs: [log()], state: { x: "0x01" } };
     const b = { ...rev("0x01"), logs: [], state: { x: "0x02" } };

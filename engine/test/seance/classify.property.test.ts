@@ -5,7 +5,9 @@
  *
  * The test carries its own small reference model (`oracle`), a straight table
  * lookup written against the design, not against classify.ts. It compares bytes
- * (via Buffer) rather than lowercased strings.
+ * (via Buffer) rather than lowercased strings, and makes no assumption about
+ * length: state values are any even-length hex from 0 to 200 bytes, including
+ * `0x`, because getters such as name() return ABI-encoded strings.
  */
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
@@ -91,10 +93,18 @@ const panicArb = fc.constantFrom(
 const dataArb = fc.oneof({ weight: 3, arbitrary: hexArb }, { weight: 2, arbitrary: panicArb });
 
 const word = (b: number): string => "0x" + b.toString(16).padStart(2, "0").repeat(32);
+/** State values: any even-length hex, 0 to 200 bytes, weighted toward 0/32/64/96 bytes (ABI strings, word-aligned data). */
+const byteArb = fc.integer({ min: 0, max: 255 });
+const bytesOfLen = (n: number): fc.Arbitrary<string> => fc.array(byteArb, { minLength: n, maxLength: n }).map(hexOf);
 const wordArb = fc.oneof(
-  fc.constantFrom(0, 1, 2).map(word),
-  fc.constantFrom(0, 1).map((n) => recase(word(n))),
-  fc.array(fc.integer({ min: 0, max: 255 }), { minLength: 32, maxLength: 32 }).map(hexOf),
+  { weight: 3, arbitrary: fc.constantFrom(0, 1, 2).map(word) },
+  { weight: 2, arbitrary: fc.constantFrom(0, 1).map((n) => recase(word(n))) },
+  { weight: 2, arbitrary: fc.constant("0x") },
+  { weight: 2, arbitrary: bytesOfLen(32) },
+  { weight: 2, arbitrary: bytesOfLen(64) },
+  { weight: 2, arbitrary: bytesOfLen(96) },
+  { weight: 3, arbitrary: fc.array(byteArb, { maxLength: 200 }).map(hexOf) },
+  { weight: 2, arbitrary: fc.array(byteArb, { maxLength: 200 }).map((bs) => recase(hexOf(bs))) },
 );
 const STATE_KEYS = ["returnData", "logs", "success", "allowed(0xA1,0xA2)", "balance", "totalSupply"] as const;
 const stateKeyArb = fc.constantFrom(...STATE_KEYS);
@@ -242,13 +252,31 @@ describe("Property 8: classification follows the decision table", () => {
           const l: CallRecord = { success: true, ...b };
           const keys = Object.keys(b.state);
           const k = keys[i % keys.length]!;
+          // Flip bits in one byte (any position, not just the last); an empty value gains a byte instead.
           const raw = bytes(b.state[k]!);
-          raw[raw.length - 1] = raw[raw.length - 1]! ^ xor;
-          const p: CallRecord = { success: true, ...b, state: { ...b.state, [k]: "0x" + raw.toString("hex") } };
+          const next =
+            raw.length === 0 ? Buffer.from([xor]) : Buffer.from(raw.map((v, n) => (n === i % raw.length ? v ^ xor : v)));
+          const p: CallRecord = { success: true, ...b, state: { ...b.state, [k]: "0x" + next.toString("hex") } };
           const r = classify(l, p);
           expect(r.classification).toBe("port-bug");
           expect(r.differingFields).toEqual([`state.${k}`]);
           expect(r.differingFields).toEqual(oracle(l, p).differingFields);
+        }),
+        run,
+      );
+    });
+
+    it("a state key present on only one side differs, whatever its value (including 0x)", () => {
+      fc.assert(
+        fc.property(baseOk, stateKeyArb, wordArb, fc.boolean(), (b, k, v, onLegacy) => {
+          const without = { ...b.state };
+          delete without[k];
+          const withKey = { ...without, [k]: v };
+          const l: CallRecord = { success: true, ...b, state: onLegacy ? withKey : without };
+          const p: CallRecord = { success: true, ...b, state: onLegacy ? without : withKey };
+          const r = classify(l, p);
+          expect(r.classification).toBe("port-bug");
+          expect(r.differingFields).toEqual([`state.${k}`]);
         }),
         run,
       );
