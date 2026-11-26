@@ -123,7 +123,7 @@ engine/src/seance/
   runner.ts           # forge process control, shared deadline
   forge-std-pin.ts    # FORGE_STD_PIN, DEFAULT_FORGE_STD_DIR, PORT_SOLC_VERSION, INVARIANT_RUNS, INVARIANT_DEPTH
   foundry-json.ts     # parser for `forge test --json` counterexamples
-  schemas/            # autopsy-v1.schema.json, seance-report.schema.json
+  schemas/            # engine/src/seance/schemas/autopsy-v1.schema.json, engine/src/seance/schemas/seance-report.schema.json
 engine/test/seance/   # vitest + fast-check, forge tests for templates
 graveyard/<name>/     # source, metadata, on-chain runtime code, seance-report.json
 ```
@@ -486,15 +486,20 @@ interface ArithmeticSite {
   function: string;
   operator: "+" | "-" | "*" | "**";
   operands: [Operand, Operand];
-  location: { file: string; line: number; column: number };
+  location: SourceLocation;
   precondition?: { kind: "constructor-balance" | "approve" | "transfer"; hint?: string }[];
 }
+interface SourceLocation { file: string; line: number /* 1-based, minimum 1 */; column: number /* 1-based, minimum 1 */ }
 type Operand =
   | { kind: "known"; value: string /* decimal */; type: string }
   | { kind: "param"; name: string; type: string }
   | { kind: "arrayLength"; name: string; type: string }
   | { kind: "unknown"; type: string };
 ```
+
+`SourceLocation.line` and `SourceLocation.column` are 1-based, and both schemas set `minimum: 1` for them. A report with `line` or `column` equal to 0 is rejected by schema validation. The same `SourceLocation` shape is used by `Finding.site.location` in the Séance_Report.
+
+The schema files are `engine/src/seance/schemas/autopsy-v1.schema.json` and `engine/src/seance/schemas/seance-report.schema.json`. Each schema's `$id` is `https://github.com/CharlesChinedum/exhume/blob/main/engine/src/seance/schemas/<file>`, where `<file>` is the schema's file name.
 
 ### Record line (JSONL, one per call, written by the handler)
 
@@ -556,7 +561,7 @@ interface Finding {
   originalLength?: number;       // pre-shrink handler-call count (counterexample.Sequence[0]); present only on shrunk findings
   unshrunk?: true;
   unshrunkReason?: "witness-not-failed" | "replay-mismatch" | "witness-cap" | "deadline" | "setup";
-  site?: { id: string; location: { file: string; line: number; column: number } } | "unattributed";
+  site?: { id: string; location: SourceLocation /* line and column 1-based */ } | "unattributed";
   legacy?: CallRecordWire;       // port bugs only
   port?: CallRecordWire;         // port bugs only
   differingFields?: string[];

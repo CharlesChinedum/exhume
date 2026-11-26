@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://exhume.dev/schemas/seance-report.schema.json",
+  "$id": "https://github.com/CharlesChinedum/exhume/blob/main/engine/src/seance/schemas/seance-report.schema.json",
   "title": "Exhume Séance report, schema version 1",
   "description": "Not expressible here and checked in code: the four counts sum to totalCalls; pairsFound = pairsSetup + pairsShrunk + pairsUnshrunk + pairsOverCap; taintedCalls and setupCalls are within counts; key order. Numbers above 2^53 must be decimal strings by the producer.",
   "type": "object",
@@ -195,11 +195,11 @@
         },
         "line": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 1
         },
         "column": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 1
         }
       }
     },

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://exhume.dev/schemas/autopsy-v1.schema.json",
+  "$id": "https://github.com/CharlesChinedum/exhume/blob/main/engine/src/seance/schemas/autopsy-v1.schema.json",
   "title": "Exhume Autopsy report, schema version 1",
   "description": "Unchecked arithmetic sites of a legacy contract. Whether every `function` names an ABI function is checked by code, not by this schema.",
   "type": "object",
@@ -41,11 +41,11 @@
         },
         "line": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 1
         },
         "column": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 1
         }
       }
     },

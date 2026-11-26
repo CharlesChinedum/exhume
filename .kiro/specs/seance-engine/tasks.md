@@ -220,12 +220,14 @@ compilation_restrictions = [
     - Keep one module so later tasks do not edit each other's types.
     - _Requirements: 4.8, 7.3, 7.4, 8.8, 11.1, 12.4_
 
-- [ ] 4. Autopsy contract and schemas
+- [x] 4. Autopsy contract and schemas
   - [x] 4.1 Write the JSON schemas
-    - Create `schemas/autopsy-v1.schema.json` and `schemas/seance-report.schema.json`. The report schema requires `runs`, `depth`, `totalCalls`, `counts`, the `shrinking` object with its seven fields, and `unshrunk` plus `unshrunkReason` on unshrunk findings.
+    - Create `engine/src/seance/schemas/autopsy-v1.schema.json` and `engine/src/seance/schemas/seance-report.schema.json`. The report schema requires `runs`, `depth`, `totalCalls`, `counts`, the `shrinking` object with its seven fields, and `unshrunk` plus `unshrunkReason` on unshrunk findings.
+    - Source-location `line` and `column` are 1-based, with a minimum of 1.
+    - The schema `$id` values are `https://github.com/CharlesChinedum/exhume/blob/main/engine/src/seance/schemas/<file>`, where `<file>` is the schema file name.
     - _Requirements: 7.8, 7.12, 11.1, 11.5_
 
-  - [ ] 4.2 Implement `autopsy-contract.ts`
+  - [x] 4.2 Implement `autopsy-contract.ts`
     - Implement `parseAutopsyReport` with the check order: empty, over 10 MB, JSON syntax, `schemaVersion` present, supported (`["1"]`), Ajv schema validation with all violations and JSON pointers, then the ABI cross-check naming every unknown function. Implement `serializeAutopsyReport` with canonical key order.
     - _Requirements: 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8, 11.10_
 
@@ -458,7 +460,7 @@ compilation_restrictions = [
     - Depends on: the legacy BEC source in the `graveyard/bec/` entry, and tasks 4.1 and 4.2 (the Autopsy schema and parser).
     - Read the legacy BEC source from the existing `graveyard/bec/` entry (solc 0.4.19, optimizer off). Fetching it (Sourcify first, Etherscan second) is the fetcher's concern and not part of this task. If the `graveyard/bec/` source or metadata is missing, say so and ask the user before continuing.
     - Write `graveyard/bec/port.golden.sol`, a hand-made Solidity 0.8 port of BEC with no logic changes, applying the workspace rewrite rules: SafeMath calls become checked operators (R1), the contract-named constructor becomes `constructor` (R2), `abstract`, `virtual`, and `override` follow real C3 linearization semantics and are not guessed by pattern (R3), arrays in external functions become `calldata` (R4), `constant` functions become `view` (R5), event calls become `emit` (R6), and `function ()` becomes `fallback()` (R7). Keep the contract name `BecToken` as in the legacy source, so artifact names match. Bug fixes come only from 0.8's built-in checks.
-    - Write `graveyard/bec/autopsy.json`, listing the unchecked arithmetic sites of the legacy BEC source by hand, including `batchTransfer`'s `cnt * _value` as an `arrayLength` operand times a `param` operand (both uint256, with the `_receivers` array length site), and the other `+`, `-`, and `*` sites in `transfer`, `transferFrom`, and the other functions, each with site id, function, operator, operands with types, and source location. Set `schemaVersion` to `"1"` and conform to `schemas/autopsy-v1.schema.json`. Include precondition hints where a site needs a balance or an `approve`.
+    - Write `graveyard/bec/autopsy.json`, listing the unchecked arithmetic sites of the legacy BEC source by hand, including `batchTransfer`'s `cnt * _value` as an `arrayLength` operand times a `param` operand (both uint256, with the `_receivers` array length site), and the other `+`, `-`, and `*` sites in `transfer`, `transferFrom`, and the other functions, each with site id, function, operator, operands with types, and source location. Set `schemaVersion` to `"1"` and conform to `engine/src/seance/schemas/autopsy-v1.schema.json`. Include precondition hints where a site needs a balance or an `approve`.
     - Check `autopsy.json` with `parseAutopsyReport` from task 4.2 against the legacy BEC ABI, and check that `port.golden.sol` compiles with solc 0.8.x in `forge build`.
     - Note: the future Resurrection spec will use `graveyard/bec/port.golden.sol` as its expected output. Do not change it later to make the Resurrection output match without a recorded reason.
     - _Requirements: 9.1, 11.1, 11.5, 11.6, 11.8_

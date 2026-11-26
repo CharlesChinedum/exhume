@@ -105,6 +105,34 @@ describe("autopsy-v1 schema", () => {
   });
 });
 
+describe("schema ids", () => {
+  const base = "https://github.com/CharlesChinedum/exhume/blob/main/engine/src/seance/schemas/";
+  for (const name of ["autopsy-v1.schema.json", "seance-report.schema.json"]) {
+    it(`${name} has the expected $id`, () => {
+      const id = (load(name) as { $id: string }).$id;
+      expect(id).toBe(base + name);
+      expect(id.endsWith(name)).toBe(true);
+    });
+  }
+});
+
+describe("SourceLocation is 1-based", () => {
+  it("autopsy rejects line 0 / column 0 and accepts 1:1", () => {
+    for (const [line, column, ok] of [[0, 1, false], [1, 0, false], [1, 1, true]] as const) {
+      const r: any = clone(autopsy);
+      r.sites[0].location = { file: "BecToken.sol", line, column };
+      expect(validateAutopsy(r)).toBe(ok);
+    }
+  });
+  it("report finding site rejects line 0 / column 0 and accepts 1:1", () => {
+    for (const [line, column, ok] of [[0, 1, false], [1, 0, false], [1, 1, true]] as const) {
+      const r: any = clone(report);
+      r.exorcisms[0].site = { id: "batchTransfer:cnt*_value", location: { file: "BecToken.sol", line, column } };
+      expect(validateReport(r)).toBe(ok);
+    }
+  });
+});
+
 describe("seance-report schema", () => {
   it("compiles and accepts a report with a shrunk exorcism and an unshrunk setup port bug", () => {
     expect(validateReport(clone(report))).toBe(true);

@@ -182,6 +182,7 @@ export interface AbiFunction {
 // Autopsy report (schema v1)
 // ---------------------------------------------------------------------------
 
+/** `line` and `column` are both 1-based. */
 export interface SourceLocation {
   file: string;
   line: number;
