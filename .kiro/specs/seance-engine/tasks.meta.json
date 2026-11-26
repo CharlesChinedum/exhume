@@ -11,6 +11,10 @@
     "7.3 Write property test for array-length-times-value pairs": {
       "status": "passed",
       "lastRunTimestamp": 1795697696301
+    },
+    "6.8 Write property test for divergence taint and finding selection": {
+      "status": "passed",
+      "lastRunTimestamp": 1795712443045
     }
   },
   "executionHistory": {
@@ -152,6 +156,16 @@
         "executionId": "be883a4d-a76a-4854-8f87-09720fa64388",
         "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
         "timestamp": 1795616874115
+      },
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795712506782
+      },
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795715206867
       }
     ],
     "1.11 Risk 9: seed determinism of discovery and of a rare witness (native only)": [
@@ -515,6 +529,16 @@
         "executionId": "d290ad8f-5773-42b3-9e9c-3616dd3134c3",
         "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
         "timestamp": 1795707904569
+      },
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795709005513
+      },
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795710575904
       }
     ],
     "8.8 Write the required forge tests: classifier vectors and the legacy assert gas cap": [
@@ -534,6 +558,147 @@
         "executionId": "d290ad8f-5773-42b3-9e9c-3616dd3134c3",
         "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
         "timestamp": 1795708196730
+      }
+    ],
+    "9.1 Implement record parsing, grouping, and counts in `report.ts`": [
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795710590320
+      },
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795710962642
+      }
+    ],
+    "9.2 Implement finding selection and dispositions in `report.ts`": [
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795710967011
+      },
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795711172761
+      }
+    ],
+    "9.3 Implement report construction, validation, and writing in `report.ts`": [
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795711173153
+      },
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795711738356
+      }
+    ],
+    "9.4 Write property test for exorcism truncation": [
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795711738482
+      },
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795711958885
+      }
+    ],
+    "9.6 Write property test for finding selection and fallback": [
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795711959621
+      },
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795712351905
+      }
+    ],
+    "9. Report builder": [
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795712351964
+      }
+    ],
+    "6.8 Write property test for divergence taint and finding selection": [
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795712352074
+      },
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795712463506
+      }
+    ],
+    "6. Classifier and taint": [
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795712463569
+      }
+    ],
+    "10.1 Implement deadline and forge arguments in `runner.ts`": [
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795715207008
+      },
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795715815520
+      }
+    ],
+    "10.2 Implement `foundry-json.ts`": [
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795715815941
+      },
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795716070473
+      }
+    ],
+    "10.3 Implement the solc, bytecode, and ABI checks": [
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795716070911
+      },
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795716316534
+      }
+    ],
+    "10.4 Implement run orchestration in `runner.ts`": [
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795716316634
+      },
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795717110466
+      }
+    ],
+    "10. Runner": [
+      {
+        "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795717110562
       }
     ]
   }

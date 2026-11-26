@@ -6,15 +6,42 @@
  *   templates in `./templates` (constant text). Identical inputs give byte-identical files; the file list is
  *   sorted by path (UTF-16 code unit order); every generated file uses LF newlines. The two contract
  *   sources are copied unchanged. There is no `lib/`.
- * - `writeProject` validates the file list first and writes nothing when it is invalid.
+ * - `writeProject` / `writeProjectFiles` validate the file list first and write nothing when it is invalid.
  * - `regenerateWitness` and `regenerateReplay` rewrite exactly one file each (`test/Witness.t.sol`,
  *   `test/Replay.t.sol`) for the Runner's later phases.
+ *
+ * - The generator is two-staged so the Runner can build before it knows the ABI: `generateSrcProject`
+ *   (`src/`, `foundry.toml`, `remappings.txt`) and `generateTestProject` (everything under `test/`);
+ *   `generateProject` is their composition. `writeProjectFiles` writes the first stage into a fresh
+ *   directory (`mode: "fresh"`) and the second into the same directory later (`mode: "add"`).
+ *
+ * KNOWN LIMITATION (stack depth, design decision 19). Handler functions are compiled without `via_ir`, so a
+ * function with many or large parameters makes solc fail with "Stack too deep". The generator estimates each
+ * handler's stack use (`estimateHandlerStack`) and SKIPS any function whose estimate exceeds
+ * `MAX_HANDLER_STACK`: no handler is generated, it is absent from the selector lists, its arithmetic sites are
+ * unreachable and seed calls naming it are dropped, so the Séance cannot reach it. It stays a known selector
+ * (`Targets.isKnownSelector`) so the fallback handler never aims at it. Skipped functions are returned as
+ * `skippedFunctions` and end up in the report. Calibration: engine/test/docker/findings/8.5.stack-limit.native.md.
  *
  * The Solidity templates are read with `readFileSync` relative to this module (`templatesDir()`), so the
  * `templates/` directory must ship next to this file (worker image).
  */
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  rmdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { FORGE_STD_DEFAULT_DIR, PORT_SOLC_VERSION, remappingsText } from "./forge-std-pin.js";
 import { renderFoundryToml } from "./foundry-config.js";
@@ -56,6 +83,11 @@ export interface GeneratorOptions {
   fundingWei?: bigint | number | string;
   /** (function, class) pairs written into `Witness.t.sol` (k = index + 1, at most 10). Default: none. */
   witnessPairs?: WitnessPair[];
+  /**
+   * Calibration and test override of the skip threshold (default `MAX_HANDLER_STACK`). `regenerateWitness` and
+   * `regenerateReplay` always use `MAX_HANDLER_STACK`, so do not set this in production.
+   */
+  maxHandlerStack?: number;
 }
 
 export interface ProjectFile {
@@ -64,7 +96,6 @@ export interface ProjectFile {
 }
 /** Sorted by `path`, unique paths, no `lib/`. */
 export type ProjectFiles = ProjectFile[];
-export type GeneratedProject = ProjectFiles;
 
 /** One call of `counterexample.Sequence[1]` from `forge test --json`. */
 export interface ShrunkCall {
@@ -225,6 +256,84 @@ function signatureOf(f: AbiFunction): Result<string> {
     types.push(t);
   }
   return ok(`${f.name}(${types.join(",")})`);
+}
+
+// ---------------------------------------------------------------------------
+// Stack-depth estimate (design decision 19)
+// ---------------------------------------------------------------------------
+
+/**
+ * Stack-slot costs of the estimate, calibrated by compiling the real handler without `via_ir` (see
+ * engine/test/docker/findings/8.5.stack-limit.native.md).
+ *
+ *   estimate = fixed + (payable ? payable : 0) + sum over the ABI parameters of the cost of its kind
+ *
+ *   scalar (uintN, intN, bool, bytesN) and address : 1  (one external parameter, `address` is a `uint8` index)
+ *   address[] and other dynamic arrays             : 3  (external length and seed/pack parameters, plus the
+ *                                                       memory array local)
+ *   bytes and string                               : 2  (calldata offset and length)
+ *   payable                                        : 1  (`weiValue`)
+ *   fixed                                          : 7  (return label, `pick`, `actorIdx`, `p`, `cd`, the
+ *                                                       encoder's temporaries)
+ *
+ * With `MAX_HANDLER_STACK = 16`, the number of slots solc can reach, the homogeneous experiments give exactly
+ * 9 scalars, 3 dynamic arrays and 4 `bytes`/`string` parameters as the largest signatures that build. Every
+ * cost is positive, so adding a parameter never decreases the estimate.
+ */
+export const STACK_COST = {
+  fixed: 7,
+  payable: 1,
+  scalar: 1,
+  address: 1,
+  array: 3,
+  bytes: 2,
+} as const;
+
+/** Handler functions whose estimate is above this are skipped (set from the compile experiment). */
+export const MAX_HANDLER_STACK = 16;
+
+export interface SkippedFunction {
+  name: string;
+  reason: "stack";
+}
+
+/**
+ * Estimated stack slots the handler function for `fn` needs, from its parameter mapping. Pure and monotone:
+ * a parameter of an unsupported type is charged like the largest kind (the generator rejects it anyway).
+ */
+export function estimateHandlerStack(fn: AbiFunction): number {
+  let n = STACK_COST.fixed + (fn.stateMutability === "payable" ? STACK_COST.payable : 0);
+  for (const p of fn.inputs) {
+    const k = parseParamType(canonicalType(p) ?? "");
+    switch (k?.kind) {
+      case "scalar":
+        n += STACK_COST.scalar;
+        break;
+      case "address":
+        n += STACK_COST.address;
+        break;
+      case "addressArray":
+      case "array":
+        n += STACK_COST.array;
+        break;
+      default: // bytes, string, unsupported
+        n += STACK_COST.bytes;
+    }
+  }
+  return n;
+}
+
+const isHandlerAbiFn = (f: AbiFunction): boolean =>
+  f.type === "function" && typeof f.name === "string" && (f.stateMutability === "nonpayable" || f.stateMutability === "payable");
+
+/**
+ * The state-changing functions whose estimate is above `max` (default `MAX_HANDLER_STACK`), sorted by name
+ * (UTF-16 code unit order) with each name once.
+ */
+export function computeSkippedFunctions(abi: AbiFunction[], max: number = MAX_HANDLER_STACK): SkippedFunction[] {
+  const names = new Set<string>();
+  for (const f of abi) if (isHandlerAbiFn(f) && estimateHandlerStack(f) > max) names.add(f.name as string);
+  return [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).map((name) => ({ name, reason: "stack" as const }));
 }
 
 // ---------------------------------------------------------------------------
@@ -443,9 +552,10 @@ function planFallbacks(abi: AbiFunction[]): HandlerFn[] {
 }
 
 /** One handler function per nonpayable/payable non-constructor ABI function, then the fallback handlers. */
-export function planHandlerFunctions(abi: AbiFunction[]): Result<HandlerFn[]> {
+export function planHandlerFunctions(abi: AbiFunction[], maxStack: number = MAX_HANDLER_STACK): Result<HandlerFn[]> {
   const out: HandlerFn[] = [];
   const seen = new Set<string>();
+  let skipped = 0;
   for (const f of abi) {
     if (f.type !== "function") continue;
     if (f.stateMutability !== "nonpayable" && f.stateMutability !== "payable") continue;
@@ -457,13 +567,22 @@ export function planHandlerFunctions(abi: AbiFunction[]): Result<HandlerFn[]> {
       );
     }
     seen.add(f.name);
-    const h = planFunction(f);
+    const h = planFunction(f); // validates every function, skipped or not
     if (!h.ok) return h;
+    if (estimateHandlerStack(f) > maxStack) {
+      skipped++;
+      continue;
+    }
     out.push(h.value);
   }
   out.push(...planFallbacks(abi));
   if (out.length === 0) {
-    return invalid("the ABI has no state-changing function and no fallback: there is nothing for the handler to fuzz");
+    return skipped > 0
+      ? invalid(
+          `nothing for the handler to fuzz: every state-changing function (${skipped}) was skipped for stack depth and the ABI has no fallback`,
+          { skippedForStack: skipped },
+        )
+      : invalid("the ABI has no state-changing function and no fallback: there is nothing for the handler to fuzz");
   }
   const names = new Set<string>();
   for (const h of out) {
@@ -911,27 +1030,27 @@ export function regenerateReplay(project: ProjectFiles, abi: AbiFunction[], sequ
 }
 
 // ---------------------------------------------------------------------------
-// generateProject
+// generateSrcProject / generateTestProject / generateProject
 // ---------------------------------------------------------------------------
 
 const byPath = (a: ProjectFile, b: ProjectFile): number => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
 
+/** Output of the stage that knows the ABI. `skippedFunctions` is sorted by name, without duplicates. */
+export interface GeneratedProject {
+  files: ProjectFiles;
+  skippedFunctions: SkippedFunction[];
+}
+
 /**
- * Generates the Foundry project. Validates `input` first (`validateInput`), so nothing is produced for an
- * invalid input. `plan` comes from `generateTargets`, `abi` from `loadAbi`.
+ * Stage 1: `src/legacy`, `src/port`, `foundry.toml` and `remappings.txt`. Needs only the input (no ABI, no
+ * plan), so the Runner can build before it knows the ABI. Validates `rawInput` first.
  */
-export function generateProject(
-  rawInput: SeanceInput,
-  plan: TargetPlan,
-  abi: AbiFunction[],
-  opts: GeneratorOptions = {},
-): Result<GeneratedProject> {
+export function generateSrcProject(rawInput: SeanceInput, opts: GeneratorOptions = {}): Result<ProjectFiles> {
   return guarded(() => {
     const v = validateInput(rawInput);
     if (!v.ok) return v;
     const input = v.value;
     const forgeStdDir = opts.forgeStdDir ?? FORGE_STD_DEFAULT_DIR;
-
     const toml = renderFoundryToml({
       contractName: input.contractName,
       legacySolcVersion: input.legacySolcVersion,
@@ -943,14 +1062,52 @@ export function generateProject(
       ...(opts.portSharesLegacyOptimizer !== undefined && { portSharesLegacyOptimizer: opts.portSharesLegacyOptimizer }),
     });
     if (!toml.ok) return toml;
+    const files: ProjectFiles = [
+      { path: PATHS.foundryToml, contents: toml.value },
+      { path: PATHS.remappings, contents: remappingsText(forgeStdDir) },
+      { path: legacyPath(input.contractName), contents: input.legacySource },
+      { path: portPath(input.contractName), contents: input.portSource },
+    ];
+    files.sort(byPath);
+    return ok(files);
+  });
+}
+
+/** Drops seed calls naming a skipped function, and sequences that become empty. */
+function withoutSkippedSeeds(plan: TargetPlan, skipped: ReadonlySet<string>): TargetPlan {
+  if (skipped.size === 0) return plan;
+  const seedSequences = plan.seedSequences
+    .map((seq) => seq.filter((c) => !skipped.has(c.function)))
+    .filter((seq) => seq.length > 0);
+  return { ...plan, seedSequences };
+}
+
+/**
+ * Stage 2: every file under `test/`, from the ABI and the TargetPlan (`witnessPairs` optional). Functions whose
+ * stack estimate is above the limit get no handler (see the module comment) and are returned in
+ * `skippedFunctions`; seed calls naming them are dropped. Validates `rawInput` first.
+ */
+export function generateTestProject(
+  rawInput: SeanceInput,
+  plan: TargetPlan,
+  abi: AbiFunction[],
+  opts: GeneratorOptions = {},
+): Result<GeneratedProject> {
+  return guarded(() => {
+    const v = validateInput(rawInput);
+    if (!v.ok) return v;
+    const input = v.value;
+    const max = opts.maxHandlerStack ?? MAX_HANDLER_STACK;
 
     const funding = parseFunding(opts.fundingWei);
     if (!funding.ok) return funding;
-    const handlers = planHandlerFunctions(abi);
+    const handlers = planHandlerFunctions(abi, max);
     if (!handlers.ok) return handlers;
-    const enc = seedEncoder(plan, abi);
+    const skippedFunctions = computeSkippedFunctions(abi, max);
+    const livePlan = withoutSkippedSeeds(plan, new Set(skippedFunctions.map((s) => s.name)));
+    const enc = seedEncoder(livePlan, abi);
     if (!enc.ok) return enc;
-    const targets = renderTargets(input, plan, abi, handlers.value, funding.value);
+    const targets = renderTargets(input, livePlan, abi, handlers.value, funding.value);
     if (!targets.ok) return targets;
     const witness = witnessFile(handlers.value, opts.witnessPairs ?? []);
     if (!witness.ok) return witness;
@@ -963,10 +1120,6 @@ export function generateProject(
     const seance = fillMarker(loadTemplate("Seance.t.sol"), "HANDLER_SELECTORS", selectorsBody(handlers.value));
 
     const files: ProjectFiles = [
-      { path: PATHS.foundryToml, contents: toml.value },
-      { path: PATHS.remappings, contents: remappingsText(forgeStdDir) },
-      { path: legacyPath(input.contractName), contents: input.legacySource },
-      { path: portPath(input.contractName), contents: input.portSource },
       { path: PATHS.handler, contents: handler },
       { path: PATHS.classifier, contents: loadTemplate("Classifier.sol") },
       { path: PATHS.targets, contents: targets.value },
@@ -975,8 +1128,26 @@ export function generateProject(
       { path: PATHS.replay, contents: replay.value },
     ];
     files.sort(byPath);
-    return ok(files);
+    return ok({ files, skippedFunctions });
   });
+}
+
+/**
+ * Both stages: the union of the two file lists, sorted by path. Nothing is produced for an invalid input.
+ * `plan` comes from `generateTargets`, `abi` from `loadAbi`.
+ */
+export function generateProject(
+  rawInput: SeanceInput,
+  plan: TargetPlan,
+  abi: AbiFunction[],
+  opts: GeneratorOptions = {},
+): Result<GeneratedProject> {
+  const src = generateSrcProject(rawInput, opts);
+  if (!src.ok) return src;
+  const test = generateTestProject(rawInput, plan, abi, opts);
+  if (!test.ok) return test;
+  const files = [...src.value, ...test.value.files].sort(byPath);
+  return ok({ files, skippedFunctions: test.value.skippedFunctions });
 }
 
 // ---------------------------------------------------------------------------
@@ -1001,15 +1172,74 @@ export function validateProjectFiles(project: ProjectFiles): Result<void> {
   return ok(undefined);
 }
 
+export type WriteMode = "fresh" | "add";
+
+/** Throws unless `full` stays inside `root` once the existing part of its path is resolved (no symlink escapes). */
+function assertInside(root: string, full: string): void {
+  let probe = full;
+  while (!existsSync(probe)) probe = dirname(probe);
+  const real = realpathSync(probe);
+  const rootReal = realpathSync(root);
+  if (real !== rootReal && !real.startsWith(rootReal + sep)) throw new Error(`${full} resolves outside ${root}`);
+}
+
 /**
- * Writes `project` to `dir`. Validates first and writes nothing on error. `dir` must not exist or be an
- * empty directory (an existing project is never overwritten: design decision 15). The files are written to
- * a sibling staging directory and renamed into place, so a failure leaves no partial project at `dir`.
+ * Writes `files` to `dir`. Validates the list first (relative, no `..`, sorted, unique, no `lib/`) and writes
+ * nothing when it is invalid.
+ *
+ * - `mode: "fresh"`: `dir` must not exist or be an empty directory (an existing project is never
+ *   overwritten: design decision 15). The files are written to a sibling staging directory and renamed into
+ *   place, so a failure leaves no partial project at `dir`.
+ * - `mode: "add"`: `dir` must be an existing directory (the first stage was written there). Every path must be
+ *   free: the call refuses, writing nothing, if any file already exists (it never overwrites). New files and
+ *   directories are removed again if the write fails halfway.
  */
-export function writeProject(dir: string, project: ProjectFiles): Result<void> {
-  const valid = validateProjectFiles(project);
+export function writeProjectFiles(dir: string, files: ProjectFiles, opts: { mode: WriteMode }): Result<void> {
+  const valid = validateProjectFiles(files);
   if (!valid.ok) return valid;
   const target = resolve(dir);
+  if (opts.mode === "fresh") return writeFresh(target, files);
+  if (opts.mode !== "add") return invalid(`unknown write mode ${JSON.stringify(opts.mode)}`);
+  if (!existsSync(target) || !statSync(target).isDirectory()) return invalid(`${target} is not an existing directory`);
+  const created: string[] = [];
+  try {
+    for (const f of files) {
+      const full = resolve(target, f.path);
+      assertInside(target, full);
+      if (lstatExists(full)) return invalid(`refusing to overwrite ${f.path} in ${target}`, { path: f.path });
+    }
+    for (const f of files) {
+      const full = resolve(target, f.path);
+      let d = dirname(full);
+      const newDirs: string[] = [];
+      while (!existsSync(d)) {
+        newDirs.unshift(d);
+        d = dirname(d);
+      }
+      for (const nd of newDirs) {
+        mkdirSync(nd);
+        created.push(nd);
+      }
+      writeFileSync(full, f.contents, { flag: "wx" });
+      created.push(full);
+    }
+    return ok(undefined);
+  } catch (e) {
+    for (const c of created.reverse()) rmSync(c, { recursive: true, force: true });
+    return failed(`could not add files to ${target}: ${(e as Error).message}`);
+  }
+}
+
+function lstatExists(p: string): boolean {
+  try {
+    lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function writeFresh(target: string, project: ProjectFiles): Result<void> {
   if (existsSync(target)) {
     if (!statSync(target).isDirectory()) return invalid(`${target} exists and is not a directory`);
     if (readdirSync(target).length > 0) return invalid(`refusing to write into ${target}: it is not empty`);
@@ -1035,6 +1265,11 @@ export function writeProject(dir: string, project: ProjectFiles): Result<void> {
   }
 }
 
+/** Writes a whole project into a new or empty directory (`writeProjectFiles` with `mode: "fresh"`). */
+export function writeProject(dir: string, project: ProjectFiles): Result<void> {
+  return writeProjectFiles(dir, project, { mode: "fresh" });
+}
+
 /** Generates, then writes. Nothing is written when generation fails. */
 export function generateAndWriteProject(
   dir: string,
@@ -1045,6 +1280,6 @@ export function generateAndWriteProject(
 ): Result<GeneratedProject> {
   const g = generateProject(input, plan, abi, opts);
   if (!g.ok) return g;
-  const w = writeProject(dir, g.value);
+  const w = writeProject(dir, g.value.files);
   return w.ok ? g : w;
 }

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/CharlesChinedum/exhume/blob/main/engine/src/seance/schemas/seance-report.schema.json",
   "title": "Exhume Séance report, schema version 1",
-  "description": "Not expressible here and checked in code: the four counts sum to totalCalls; pairsFound = pairsSetup + pairsShrunk + pairsUnshrunk + pairsOverCap; taintedCalls and setupCalls are within counts; key order. Numbers above 2^53 must be decimal strings by the producer.",
+  "description": "Not expressible here and checked in code: the four counts sum to totalCalls; pairsFound = pairsSetup + pairsShrunk + pairsUnshrunk + pairsOverCap; taintedCalls and setupCalls are within counts; skippedFunctions sorted by name without duplicates; key order. Numbers above 2^53 must be decimal strings by the producer.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,7 +19,8 @@
     "portBugs",
     "sequenceResults",
     "shrinking",
-    "unreachableSites"
+    "unreachableSites",
+    "skippedFunctions"
   ],
   "properties": {
     "schemaVersion": {
@@ -163,6 +164,29 @@
       "type": "array",
       "items": {
         "type": "string"
+      }
+    },
+    "skippedFunctions": {
+      "description": "Handlers skipped for stack depth. Sorted by name with no duplicate names (checked in code).",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "reason"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "enum": [
+              "stack"
+            ]
+          }
+        }
       }
     }
   },

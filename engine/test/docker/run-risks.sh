@@ -13,5 +13,5 @@ docker build --platform linux/amd64 \
 
 # Mount the harness directory so findings/*.docker.md land in the repo.
 docker run --rm --platform linux/amd64 \
-  -v "$HERE:/work" -w /work \
+  -v "$HERE:/work" -v "$HERE/../fixtures:/fixtures:ro" -w /work \
   "$IMAGE" bash /work/run-in-container.sh

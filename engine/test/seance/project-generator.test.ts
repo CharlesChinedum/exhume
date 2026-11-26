@@ -97,7 +97,7 @@ const STD = "/opt/forge-std";
 function gen(input: SeanceInput, abi: AbiFunction[], plan: TargetPlan, opts: GeneratorOptions = {}): ProjectFiles {
   const r = generateProject(input, plan, abi, opts);
   if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`);
-  return r.value;
+  return r.value.files;
 }
 const file = (p: ProjectFiles, path: string): string => {
   const f = p.find((x) => x.path === path);

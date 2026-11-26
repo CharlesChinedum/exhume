@@ -54,12 +54,12 @@ variant() {
 }
 
 variant OFF "" ""
-variant ON ', min_optimizer_runs = 200' ""
-variant BOTH ', min_optimizer_runs = 200' ', min_optimizer_runs = 200'
+variant ON ', min_optimizer_runs = 200, max_optimizer_runs = 200' ""
+variant BOTH ', min_optimizer_runs = 200, max_optimizer_runs = 200' ', min_optimizer_runs = 200, max_optimizer_runs = 200'
 
 # Informational: a top-level `solc = "0.8.28"` (design.md describes the port as a top-level solc pin).
 rm -rf out cache seance-out; mkdir -p seance-out
-write_toml 'solc = "0.8.28"' ', min_optimizer_runs = 200' ""
+write_toml 'solc = "0.8.28"' ', min_optimizer_runs = 200, max_optimizer_runs = 200' ""
 forge build >build.TOPSOLC.log 2>&1; TOPSOLC_rc=$?
 TOPSOLC_msg=$(grep -E 'Error|error' build.TOPSOLC.log | head -2 | tr '\n' ' ')
 
@@ -109,7 +109,7 @@ done
   echo
   echo "- forge: $(forge --version | head -1)"
   echo "- Fixture: \`src/legacy/LegacyToken.sol\` (contract \`Token\`, solc =0.4.19) and \`src/port/PortToken.sol\` (contract \`Token\`, solc =0.8.28). Test \`DeployCodeTest\` calls \`deployCode(\"LegacyToken.sol:Token\")\` and \`deployCode(\"PortToken.sol:Token\")\`."
-  echo "- Three builds, each in a clean \`out/\` and \`cache/\`: OFF (legacy optimizer off), ON (legacy restricted with \`min_optimizer_runs = 200\`, selecting the optimizer profile), BOTH (the port also restricted with \`min_optimizer_runs = 200\`)."
+  echo "- Three builds, each in a clean \`out/\` and \`cache/\`: OFF (legacy optimizer off), ON (legacy restricted with \`min_optimizer_runs = 200, max_optimizer_runs = 200\`, selecting the optimizer profile; the generator emits both bounds because min alone also matches the default profile when R = 0, found by task 8.1), BOTH (the port also restricted with both bounds)."
   echo
   echo "| build | forge build rc | both artifacts | legacy compiler | legacy optimizer | port compiler | port optimizer | DeployCodeTest rc |"
   echo "|---|---|---|---|---|---|---|---|"
@@ -126,16 +126,16 @@ done
   cat keys.txt
   echo '```'
   echo "- Informational, top-level \`solc = \"0.8.28\"\` together with the legacy restriction: forge build rc=$TOPSOLC_rc ${TOPSOLC_msg:+(\`$TOPSOLC_msg\`)}."
-  echo "- (c) Working foundry.toml (the BOTH variant adds \`, min_optimizer_runs = 200\` to the port entry; ON as shown):"
+  echo "- (c) Working foundry.toml (the BOTH variant adds \`, min_optimizer_runs = 200, max_optimizer_runs = 200\` to the port entry; ON as shown):"
   echo '```toml'
   cat foundry.ON.toml
   echo '```'
-  echo "  The default profile carries \`optimizer = false\` and \`optimizer_runs = 1\` so that the legacy-off artifact and the default settings differ in \`runs\` from the optimizer profile, and \`min_optimizer_runs = 200\` is satisfied only by the \`legacy_opt\` additional profile."
+  echo "  The default profile carries \`optimizer = false\` and \`optimizer_runs = 1\` so that the legacy-off artifact and the default settings differ in \`runs\` from the optimizer profile, and the bounds \`min_optimizer_runs = 200, max_optimizer_runs = 200\` are satisfied only by the \`legacy_opt\` additional profile."
   if [ "$verdict" = FAIL ]; then
     echo "- Failure reasons:$reasons"
     echo "- Design change needed: decision 9 and the \`foundry.toml\` section must switch to the scheme that the table above shows working (see the rows that failed)."
   else
-    echo "- Design change needed: yes, foundry.toml section only. Do not use a top-level \`solc\` pin (see the informational line); pin the port with \`version = \"=0.8.28\"\` in its own \`compilation_restrictions\` entry. Select the legacy optimizer profile with \`min_optimizer_runs = 200\` in the legacy entry plus \`additional_compiler_profiles = [{ name = \"legacy_opt\", optimizer = true, optimizer_runs = 200 }]\`. The default profile must set \`optimizer = false\` and \`optimizer_runs = 1\`. Decision 9 (artifact names) holds unchanged."
+    echo "- Design change needed: yes, foundry.toml section only. Do not use a top-level \`solc\` pin (see the informational line); pin the port with \`version = \"=0.8.28\"\` in its own \`compilation_restrictions\` entry. Select the legacy optimizer profile with \`min_optimizer_runs = 200, max_optimizer_runs = 200\` (both bounds, R = 200) in the legacy entry plus \`additional_compiler_profiles = [{ name = \"legacy_opt\", optimizer = true, optimizer_runs = 200 }]\`. The default profile must set \`optimizer = false\` and \`optimizer_runs = 1\`. Decision 9 (artifact names) holds unchanged."
   fi
 } >"$FINDINGS_FILE"
 

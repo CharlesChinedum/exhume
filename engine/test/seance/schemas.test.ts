@@ -74,6 +74,7 @@ const report: SeanceReport = {
   sequenceResults: { total: 3, endedExorcised: 1, exorcisedAtIndex: [4] },
   shrinking: { witnessCap: 10, pairsFound: 2, pairsSetup: 1, pairsShrunk: 1, pairsUnshrunk: 0, pairsOverCap: 0, deadlineReached: false },
   unreachableSites: [],
+  skippedFunctions: [{ name: "bigFn", reason: "stack" }],
 };
 
 describe("autopsy-v1 schema", () => {
@@ -163,5 +164,9 @@ describe("seance-report schema", () => {
   bad("exorcised finding with legacy", (r) => (r.exorcisms[0].legacy = wire));
   bad("an unknown unshrunkReason", (r) => (r.portBugs[0].unshrunkReason = "gave-up"));
   bad("a bad sender address", (r) => (r.exorcisms[0].sender = "0x1234"));
+  bad("missing skippedFunctions", (r) => delete r.skippedFunctions);
+  bad("a skippedFunctions reason other than stack", (r) => (r.skippedFunctions[0].reason = "gas"));
+  bad("a skippedFunctions entry with an extra property", (r) => (r.skippedFunctions[0].extra = 1));
+  bad("a skippedFunctions entry without a name", (r) => delete r.skippedFunctions[0].name);
   bad("non-decimal msg.value", (r) => (r.exorcisms[0].value = "0x10"));
 });

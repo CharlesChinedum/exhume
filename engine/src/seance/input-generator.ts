@@ -326,13 +326,18 @@ function hasFn(abi: AbiFunction[], name: string): boolean {
  * Address arguments are Actor_Set indices written as decimal strings (the handler's `actorIdx`).
  * A kind whose function is missing from the ABI makes the site unreachable.
  */
-function seedFor(site: ArithmeticSite, abi: AbiFunction[]): { calls: SeedCall[]; unreachable: boolean } {
+function seedFor(
+  site: ArithmeticSite,
+  abi: AbiFunction[],
+  skipped: ReadonlySet<string>,
+): { calls: SeedCall[]; unreachable: boolean } {
   const calls: SeedCall[] = [];
   let unreachable = false;
   for (const pre of site.precondition ?? []) {
     if (pre.kind === "constructor-balance") continue;
     const fn = pre.kind; // "approve" | "transfer"
-    if (!hasFn(abi, fn)) {
+    // A skipped function has no handler, so its seed call is dropped and the site loses its seed.
+    if (!hasFn(abi, fn) || skipped.has(fn)) {
       unreachable = true;
       continue;
     }
@@ -352,9 +357,16 @@ function seedFor(site: ArithmeticSite, abi: AbiFunction[]): { calls: SeedCall[];
  * error instead of a throw. Task 4.2 already rejects that earlier; this is a safety net for
  * direct callers.
  *
+ * `skipped` (default none) names functions the Project_Generator skips for stack depth (design decision 19):
+ * their sites are `unreachable: true` (entries are still produced), and seed calls naming them are dropped.
+ *
  * Seed sequences: one per site that needs calls, in site order, identical sequences kept once.
  */
-export function generateTargets(report: AutopsyReport, abi: AbiFunction[]): Result<TargetPlan> {
+export function generateTargets(
+  report: AutopsyReport,
+  abi: AbiFunction[],
+  skipped: ReadonlySet<string> = new Set(),
+): Result<TargetPlan> {
   const sites: SiteTargets[] = [];
   const seedSequences: SeedCall[][] = [];
   const seenSeeds = new Set<string>();
@@ -380,7 +392,7 @@ export function generateTargets(report: AutopsyReport, abi: AbiFunction[]): Resu
     const fn =
       candidates.find((f) => names.every((n) => f.inputs.some((p) => p.name === n))) ?? (candidates[0] as AbiFunction);
 
-    const seed = seedFor(site, abi);
+    const seed = seedFor(site, abi, skipped);
     if (seed.calls.length > 0) {
       const key = JSON.stringify(seed.calls);
       if (!seenSeeds.has(key)) {
@@ -396,7 +408,7 @@ export function generateTargets(report: AutopsyReport, abi: AbiFunction[]): Resu
       siteId: site.id,
       functionName: site.function,
       entries,
-      unreachable: seed.unreachable || allEmpty,
+      unreachable: seed.unreachable || allEmpty || skipped.has(site.function),
     });
   }
   return ok({ sites, seedSequences });

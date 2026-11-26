@@ -405,5 +405,8 @@ export interface SeanceReport {
     pairsOverCap: number;
     deadlineReached: boolean;
   };
+  /** Site ids in autopsy order, unique; includes every site of a skipped function. */
   unreachableSites: string[];
+  /** Handlers skipped for stack depth. Sorted by name, no duplicate names, `[]` when none. */
+  skippedFunctions: { name: string; reason: "stack" }[];
 }

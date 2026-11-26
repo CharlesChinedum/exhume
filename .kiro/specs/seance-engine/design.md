@@ -47,6 +47,14 @@ Key design decisions:
       - For a **shrunk** finding, Phase 3 (`SeanceReplay<k>`, Requirement 8.3) has already re-executed the sequence on a fresh `setUp` and confirmed that its Classification equals the original. That check is the reproducibility evidence.
       - For an **unshrunk** finding (reasons `setup`, `witness-cap`, `witness-not-failed`, `replay-mismatch`, `deadline`), the stored original sequence is reported with its recorded Classification and is **not replay-verified**. A reader must treat it as an observation from one campaign.
 
+17. **Witness contracts are generated after discovery, from the selected pairs.** The (function, Classification) pairs are known only after the Report_Builder has selected them from the discovery records, so `test/Witness.t.sol` cannot be final when the project is first written. `generateProject` and `generateTestProject` take an optional `witnessPairs` list (default empty; `Witness.t.sol` then holds only its pragma and imports and no contract). After discovery, the Runner calls `regenerateWitness(project, abi, pairs)`, which returns the project with only `test/Witness.t.sol` replaced, writes that one file, and runs the witness campaigns. No other file changes, so forge recompiles only the rewritten test file. Both functions are pure.
+
+18. **The ABI comes from forge, so project generation has two stages.** `SeanceInput` carries no ABI. The Runner obtains it in three steps (see Runner): (a) write `src/`, `foundry.toml`, and `remappings.txt` (`generateSrcProject`) and run `forge build`; (b) read the legacy ABI from `out/Legacy<Name>.sol/<Name>.json`, run the on-chain bytecode check from the same build, and check that the port's ABI (`out/Port<Name>.sol/<Name>.json`) matches the legacy ABI; (c) write `test/` (`generateTestProject`, which needs the ABI and the TargetPlan) and run `forge test`, which reuses the cached `src/` build. `generateProject` remains as the composition of the two stages, used by tests.
+
+    The ABI match compares **function entries only**: each entry's key is its name plus the ordered list of canonical input types (tuples expanded, for example `(uint256,address)[]`), and the two sides are compared as multisets of keys, so overloads are handled. `stateMutability` (and the legacy `constant` flag), output types, parameter names, events, errors, the constructor, and the presence of `fallback` or `receive` are ignored. Constructor input differences surface as a constructor outcome in setup (both deployments get identical `ctorArgs`), and a fallback or receive difference surfaces as a classified divergence, so neither needs a pre-check. A mismatch is an `INVALID_INPUT` error naming the signatures present on only one side.
+
+19. **Handlers that would overflow the stack are skipped, not compiled with `via_ir`.** A handler with many compound parameters can fail to compile with "Stack too deep". `via_ir` is not used, because it slows every build and build time is inside the 300 s deadline. The generator instead calls `estimateHandlerStack(fn)` for each `nonpayable` or `payable` ABI function and skips any function whose estimate exceeds the named constant `MAX_HANDLER_STACK`. For a skipped function no handler is generated, every Arithmetic_Site in it is `unreachable`, and the Séance_Report lists it in `skippedFunctions` with `reason: "stack"`. The value of `MAX_HANDLER_STACK`, and the weights `estimateHandlerStack` gives to each parameter kind, are set from a compile experiment (a task finds the largest handler signature that builds without `via_ir`). This design fixes no number. Skipping replaces any earlier idea of failing the run on such a function.
+
 Research notes (Foundry behaviour this design relies on, from Foundry docs): `compilation_restrictions` in `foundry.toml` pins a file path to a solc version, `vm.deployCode("File.sol:Contract", args)` deploys an artifact by name, `vm.recordLogs`/`vm.getRecordedLogs` capture logs per call, `vm.writeLine` requires `fs_permissions`, `targetContract`/`excludeContract`/`targetSelector` restrict invariant targets, invariant failures are shrunk by default bounded by `shrink_run_limit`, and `forge test --json` reports a `counterexample` call list for a failed invariant. These are the assumptions the Docker integration tests verify (see Known risks).
 
 ## Architecture
@@ -54,18 +62,20 @@ Research notes (Foundry behaviour this design relies on, from Foundry docs): `co
 ```mermaid
 flowchart TD
     CLI[Entry_Point CLI / library] --> V[Input validation]
-    V --> AC[Autopsy contract: schema + ABI check]
+    V --> SG[generateSrcProject: src/, foundry.toml, remappings.txt]
+    SG --> FP[(Foundry_Project on disk, fresh temp dir)]
+    FP --> BC[forge build, src only]
+    BC --> ABI[Read legacy ABI, bytecode check, port ABI match]
+    ABI --> AC[Autopsy contract: schema + ABI check]
     AC --> IG[Input_Generator]
-    V --> PG[Project_Generator]
-    IG --> PG
-    PG --> FP[(Foundry_Project on disk)]
-    FP --> BC[forge build + bytecode check]
-    BC --> D1[Phase 1: discovery forge test]
+    IG --> TG[generateTestProject: test/ files]
+    TG --> D1[Phase 1: discovery forge test, reuses src build]
     D1 --> REC[(seance-out/records.jsonl)]
     REC --> SEL[Report_Builder: order, taint check, select pairs]
     SEL --> SU[Setup findings: reported as-is, reason setup]
     SU --> RB
-    SEL --> W[Phase 2: witness forge test --json, at most 10 non-setup pairs]
+    SEL --> RW[regenerateWitness: rewrite test/Witness.t.sol for the selected pairs]
+    RW --> W[Phase 2: witness forge test --json, at most 10 non-setup pairs]
     W --> RP[Phase 3: replay SeanceReplay k, one forge run per pair]
     RP --> RREC[(seance-out/replay-N.jsonl)]
     RREC --> RB[Report_Builder: build findings]
@@ -115,7 +125,8 @@ engine/src/seance/
   inputs.ts           # entry input validation
   autopsy-contract.ts # schema validation, ABI cross-check
   input-generator.ts  # Targeted_Values
-  project-generator.ts
+  project-generator.ts  # generateSrcProject, generateTestProject, generateProject, regenerateWitness, estimateHandlerStack
+  abi.ts              # AbiFunction, readForgeAbi, compareAbis
   templates/          # Handler.sol, Classifier.sol, Seance.t.sol, Witness.t.sol, Replay.t.sol
   classify.ts
   taint.ts            # afterDivergence computation and cross-check
@@ -180,7 +191,8 @@ The schema is loaded with a JSON import attribute (`import schema from "./schema
 Pure, `bigint` based.
 
 ```ts
-export function generateTargets(report: AutopsyReport, abi: AbiFunction[]): TargetPlan;
+export function generateTargets(report: AutopsyReport, abi: AbiFunction[], skipped: ReadonlySet<string>): TargetPlan;
+// `skipped` holds the names from computeSkippedFunctions(abi); every site in such a function is unreachable
 
 export interface TargetPlan {
   sites: SiteTargets[];          // one entry per Arithmetic_Site
@@ -190,7 +202,7 @@ export interface SiteTargets {
   siteId: string;
   functionName: string;
   entries: TargetEntry[];        // 1..64
-  unreachable: boolean;          // true when no seed is resolvable, or when every entry has an empty assignments list
+  unreachable: boolean;          // true when no seed is resolvable, when every entry has an empty assignments list, or when the site's function is skipped (stack)
 }
 // One call of a seed sequence. It runs through the same differential path as a fuzz call.
 export interface SeedCall {
@@ -239,30 +251,55 @@ Seed sequences come from the Autopsy site's precondition hints (constructor-set 
 
 **Empty-assignment entries.** When no operand of a site could be mapped to a handler parameter (for example the operand is a state variable or a local, and not a parameter or an array length), the generator produces a single entry with an empty `assignments` list, so the 1..64 floor still holds. When every entry of a site has an empty `assignments` list, the generator sets `unreachable: true` for that site, in addition to the no-resolvable-seed rule above. The handler ignores an entry with no assignments: if `_pickTarget` selects such an entry, the call uses fuzzed values for every parameter. The Report_Builder fills `SeanceReport.unreachableSites` with the `siteId` of every `SiteTargets` whose `unreachable` is true, whatever the reason, in the order of the Autopsy_Report's sites and without duplicates.
 
+**Skipped functions.** A site in a function that the Project_Generator skips for stack depth (decision 19) is `unreachable: true`, and still receives its entries so the 1..64 floor holds. The entries are never used, because no handler exists for that function.
+
 ### Project_Generator (`project-generator.ts`)
 
 ```ts
 export interface GeneratorOptions {
   forgeStdDir?: string;               // <FORGE_STD_DIR>, absolute path, default "/opt/forge-std"; no trailing slash
   portSharesLegacyOptimizer?: boolean; // default false; adds min_optimizer_runs = R and max_optimizer_runs = R to the port restriction
+  fundingWei?: bigint;                // default 0n; the source of FUNDING_WEI in Targets.sol (SeanceInput has no funding field)
 }
-export function generateProject(input: SeanceInput, plan: TargetPlan, abi: AbiFunction[], opts?: GeneratorOptions): ProjectFiles;
+export interface WitnessPair { function: string; classification: "exorcised" | "port-bug" }  // at most 10; Witness<k> uses the 1-based position k
+
+// Stage 1: needs only the input. Writes src/, foundry.toml, remappings.txt. Independent of the ABI and the plan.
+export function generateSrcProject(input: SeanceInput, opts?: GeneratorOptions): ProjectFiles;
+// Stage 2: needs the ABI (read from forge) and the plan. Writes every file under test/.
+export function generateTestProject(input: SeanceInput, plan: TargetPlan, abi: AbiFunction[],
+  opts?: GeneratorOptions, witnessPairs?: WitnessPair[]): ProjectFiles;
+// Composition of the two stages, used by tests: union of both file lists, sorted by path.
+export function generateProject(input: SeanceInput, plan: TargetPlan, abi: AbiFunction[],
+  opts?: GeneratorOptions, witnessPairs?: WitnessPair[]): ProjectFiles;
+// Returns `project` with only test/Witness.t.sol replaced by the contracts for `pairs`.
+export function regenerateWitness(project: ProjectFiles, abi: AbiFunction[], pairs: WitnessPair[]): ProjectFiles;
+
+// Stack-depth skip rule (decision 19).
+export const MAX_HANDLER_STACK: number;                       // set from the compile experiment; this design fixes no value
+export function estimateHandlerStack(fn: AbiFunction): number; // pure; counts the handler's parameter and local slots from the table below
+export function computeSkippedFunctions(abi: AbiFunction[]): SkippedFunction[]; // functions with estimate > MAX_HANDLER_STACK, sorted by name, no duplicates
+export interface SkippedFunction { name: string; reason: "stack" }
+
 // ProjectFiles = Array<{ path: string; contents: string }> sorted by path, LF newlines, no timestamps
-export function writeProject(dir: string, files: ProjectFiles): Promise<void>; // atomic: validate first, then write
+export function writeProject(dir: string, files: ProjectFiles): Promise<void>; // atomic per call: validate first, then write
 ```
 
-The generator is a pure function with no clocks, randomness, or environment reads, so identical inputs give byte-identical files (Requirement 1.13). Output layout (`<Name>` is the contract name; the contract identifiers inside the files are unchanged):
+The Runner writes the stage 1 files, builds, and only then generates and writes the stage 2 files (see Runner). `generateTestProject` and `regenerateWitness` compute the skipped set with `computeSkippedFunctions(abi)`, the same function the Runner passes to the Input_Generator, so all three agree. `regenerateWitness` throws a programming error for more than 10 pairs; the Runner never passes more, because `selectFindingPairs` caps the list.
+
+The generator functions are pure, with no clocks, randomness, or environment reads, so identical inputs give byte-identical files (Requirement 1.13). Output layout (`<Name>` is the contract name; the contract identifiers inside the files are unchanged):
 
 ```
-foundry.toml
-remappings.txt                   # forge-std/=<FORGE_STD_DIR>/src/ (pinned, vendored in the image)
+foundry.toml                     # stage 1 (generateSrcProject)
+remappings.txt                   # stage 1; forge-std/=<FORGE_STD_DIR>/src/ (pinned, vendored in the image)
 src/legacy/Legacy<Name>.sol      # restriction: version = "=<legacy version>" (+ min_optimizer_runs = R, max_optimizer_runs = R when optimizer on)
 src/port/Port<Name>.sol          # restriction: version = "=0.8.28" (its own entry, no top-level solc)
 test/handler/DifferentialHandler.sol
 test/handler/Classifier.sol
 test/handler/Targets.sol         # target entries as constants
 test/Seance.t.sol                # contract SeanceDiscovery: one invariant_discovery function
-test/Witness.t.sol               # contracts Witness1..Witness10, one invariant_witness each (phase 2)
+test/Witness.t.sol               # contracts Witness1..Witness<n>, n <= 10, one invariant_witness each (phase 2); one per entry of
+                                 # witnessPairs, none when the list is empty; replaced by regenerateWitness after discovery
+                                 # (everything under test/ is stage 2, generateTestProject)
 test/Replay.t.sol                # contracts SeanceReplay1..SeanceReplay10, one per shrunk sequence (phase 3),
                                  # each with its own setUp, output path, and test_replay
 ```
@@ -280,6 +317,18 @@ test/Replay.t.sol                # contracts SeanceReplay1..SeanceReplay10, one 
 - `gas_limit` set high enough (1,000,000,000) that two capped calls of 10,000,000 gas each, plus the handler's own work, never hit the block limit;
 - `[invariant]` settings: `runs = 256` and `depth = 64` (the constants `INVARIANT_RUNS` and `INVARIANT_DEPTH` in `forge-std-pin.ts`, so a discovery campaign makes `INVARIANT_RUNS * INVARIANT_DEPTH` = 16,384 counted handler calls, and Foundry then replays the final run once, which writes `INVARIANT_DEPTH` further lines that are not counted, see decision 13), `fail_on_revert = true` (a handler revert is an engine fault, see Error Handling), and `shrink_run_limit = 0` for discovery. Witness campaigns set the environment variable `FOUNDRY_INVARIANT_SHRINK_RUN_LIMIT=5000` (forge's default, read in task 1.9), which was checked to override the file's `shrink_run_limit = 0`. `report.runs` is `INVARIANT_RUNS`, the same constant the generator writes to `foundry.toml`, and `report.depth` is `INVARIANT_DEPTH`.
 - `remappings.txt` with `forge-std/=<FORGE_STD_DIR>/src/` and `allow_paths = ["<FORGE_STD_DIR>"]`, so the project compiles against the pinned forge-std vendored in the Docker image (decision 11), with `<FORGE_STD_DIR>` the generator's `forgeStdDir` option.
+- no `via_ir` key anywhere, and no `optimizer` setting that depends on it (decision 19).
+
+**Targets.sol constants.** `FUNDING_WEI` is `GeneratorOptions.fundingWei` (default 0). `HAS_TOKEN_SHARES` is true if and only if the ABI has both `transfer(address,uint256)` and `balanceOf(address)`.
+
+**Stack-depth skip.** For every `nonpayable` or `payable` ABI function, `estimateHandlerStack(fn)` estimates the stack slots the handler function needs from its mapped parameters (the table under Input_Generator: a scalar maps to one slot, `address` to one, `address[]` and other dynamic arrays to two, `bytes` and `string` to one, plus the fixed `pick`, `actorIdx`, `weiValue`, and locals). A function whose estimate is greater than `MAX_HANDLER_STACK` is skipped:
+
+- no handler function is generated for it, and it is absent from `handlerSelectors()`;
+- seed calls that name it are dropped from the seed sequences, and a site whose seed becomes unresolvable is `unreachable` by the existing rule;
+- every Arithmetic_Site whose `function` is the skipped function is `unreachable` (the Input_Generator receives the skipped set);
+- its name appears once in `SeanceReport.skippedFunctions` (overloads share a name, so any skipped overload lists the name once).
+
+The rule skips and never fails. If the estimate under-counts and `forge test` still reports "Stack too deep", the run ends in `BUILD_FAILED` with the compiler output, so `MAX_HANDLER_STACK` should be set conservatively below the largest signature that built in the experiment. `fallback` handlers take no mapped parameters and are never skipped.
 
 ### Discovery invariant test (generated `Seance.t.sol`)
 
@@ -309,16 +358,16 @@ contract SeanceDiscovery is Test {
 
 **Setup (`init`).**
 
-1. Under `vm.startPrank(DEPLOYER)`, deploy legacy with `vm.deployCode("Legacy<Name>.sol:<Name>", ctorArgs)` and port with `vm.deployCode("Port<Name>.sol:<Name>", ctorArgs)`, with byte-identical `ctorArgs`. After both deployments succeed, fund both with the same wei (`Targets.FUNDING_WEI`) using `vm.deal`. forge-std v1.9.4 (the pinned version) has no `deployCode(path, args, value)` overload, so the constructors run with `msg.value = 0`. A contract whose constructor needs `msg.value` is not supported (see Known risks).
+1. Under `vm.startPrank(DEPLOYER)`, deploy legacy with `vm.deployCode("Legacy<Name>.sol:<Name>", ctorArgs)` and port with `vm.deployCode("Port<Name>.sol:<Name>", ctorArgs)`, with byte-identical `ctorArgs`. After both deployments succeed, fund both with the same wei (`Targets.FUNDING_WEI`, from `GeneratorOptions.fundingWei`, default 0; no `vm.deal` is made when it is 0) using `vm.deal`. forge-std v1.9.4 (the pinned version) has no `deployCode(path, args, value)` overload, so the constructors run with `msg.value = 0`. A contract whose constructor needs `msg.value` is not supported (see Known risks).
 2. If the constructors differ in outcome, or both revert, write a record with `idx = -1` and set `stopped`. Otherwise continue.
-3. **Token shares.** When the ABI has `transfer(address,uint256)` and `balanceOf(address)`, read the deployer's balance on the legacy deployment, set `share = balance / ACTORS.length`, and for each actor other than the deployer send `transfer(actor, share)` from the deployer through the normal differential path (same calldata and sender to both deployments, compared and classified). When the ABI lacks either function, this step is skipped.
+3. **Token shares.** When `Targets.HAS_TOKEN_SHARES` is true (the ABI has both `transfer(address,uint256)` and `balanceOf(address)`; skipping a function for stack depth does not change it), read the deployer's balance on the legacy deployment, set `share = balance / ACTORS.length`, and for each actor other than the deployer send `transfer(actor, share)` from the deployer through the normal differential path (same calldata and sender to both deployments, compared and classified). When the ABI lacks either function, this step is skipped.
 4. Run the Input_Generator's seed sequences through the same differential path.
 
 **Setup records are counted.** Every setup call (constructor, token share transfer, seed call) writes a record with `idx = -1`, is classified, and is included in `counts` and `totalCalls`. This happens once per forge process, not once per sequence (Foundry reverts to the post-`setUp` state), so it adds `ACTORS.length - 1` plus the seed calls (at most a few dozen) to the totals. Setup records are excluded from the budget ordinal: the "within 2,000 fuzz calls" measure for BEC counts only records with `idx >= 0`, so setup never consumes the call budget. Handler calls made while `stopped` produce no record and do not consume the budget either. A `port-bug` or `exorcised` setup record sets `stopped` in `setUp`, which Foundry preserves in the snapshot, so the séance ends with zero fuzz calls, consistent with Requirements 2.6 and 5.1. A setup `port-bug` taints the remaining setup records in the same way as a fuzz sequence. Because `diverged` is handler storage written during `setUp`, it is part of the snapshot that every fuzz sequence starts from, so after a setup `port-bug` every fuzz record carries `afterDivergence = true`. Findings whose first untainted record is a setup record skip phases 2 and 3 and are reported as-is with `unshrunkReason: "setup"` (decision 10). Their `precedingCalls` are the earlier setup calls in order.
 
 **Output path.** `setOutputPath(path)` must be called before `init`. `vm.writeFile` and `vm.writeLine` do not create directories, so when recording is on (`SEANCE_RECORD != 0`) it calls `vm.createDir("seance-out", true)` and then truncates the file with `vm.writeFile(path, "")`. It works only for paths under `seance-out/`, the one writable `fs_permissions` entry. With `SEANCE_RECORD=0` it creates nothing.
 
-**Handler functions.** One handler function per `nonpayable`/`payable` non-constructor ABI function, plus `handler_fallback_empty` and `handler_fallback_unknown` when the ABI has a `fallback`. Each takes `(uint256 pick, uint8 actorIdx, <mapped params from the table above>)`; payable functions add a `uint256 weiValue` that is bounded to `ACTOR_WEI` (a constant, `10_000 ether`).
+**Handler functions.** One handler function per `nonpayable`/`payable` non-constructor ABI function that is not skipped for stack depth (decision 19), plus `handler_fallback_empty` and `handler_fallback_unknown` when the ABI has a `fallback`. Each takes `(uint256 pick, uint8 actorIdx, <mapped params from the table above>)`; payable functions add a `uint256 weiValue` that is bounded to `ACTOR_WEI` (a constant, `10_000 ether`).
 
 **Target selection is deterministic in `pick`.**
 
@@ -439,6 +488,7 @@ Behaviour:
 - `chooseReported(original, shrunk, replayClass)` returns the shrunk sequence only if `replayClass` equals the original Classification, otherwise the original, flagged `unshrunk: true`.
 - Attributes an Arithmetic_Site to an Exorcism when the exorcised call's function has exactly one site whose Targeted_Value appears in the calldata at the site's `ParamSlot` (following the offset for `dynamicArrayLength`), else `siteAttribution: "unattributed"`.
 - Writes via temp file and rename so a write failure leaves any existing report unchanged (Requirement 7.2).
+- `skippedFunctions` is copied from `ReportMeta` (the Runner's `computeSkippedFunctions(abi)`), sorted by name with duplicates removed. The field is always present, and `seance-report.schema.json` requires it (the report-schema task owns the schema change).
 
 ### Runner (`runner.ts`) and shared deadline
 
@@ -448,6 +498,17 @@ export function makeDeadline(startMs: number, timeoutSeconds: number): Deadline;
 export function phaseBudgetMs(d: Deadline, nowMs: number): number;   // max(0, d.at - nowMs)
 export function buildForgeArgs(phase: Phase, opts: ForgeOpts): string[];
 ```
+
+**Run orchestration.** After `validateInput`, the Runner works in this order, always in a fresh temporary project directory:
+
+1. Create the directory and check that the legacy solc binary exists (`SOLC_MISSING`).
+2. Step (a): write `generateSrcProject` files (`src/legacy`, `src/port`, `foundry.toml`, `remappings.txt`) and run `forge build --offline`. The deadline rule for build applies (below).
+3. Step (b): read the legacy ABI from `out/Legacy<Name>.sol/<Name>.json` and the port ABI from `out/Port<Name>.sol/<Name>.json`. Run the bytecode check on the legacy runtime code from the same build (`BYTECODE_MISMATCH`). Compare the two ABIs with `compareAbis` (function entries only, decision 18); a mismatch is `INVALID_INPUT` naming the differing signatures. Then run `parseAutopsyReport(text, legacyAbi)` (`AUTOPSY_REJECTED`), compute `computeSkippedFunctions(abi)`, and run `generateTargets`.
+4. Step (c): write the `generateTestProject` files (`test/`, with no witness pairs) and run discovery with `forge test`, which reuses the cached `src/` build. Compiling the test files is inside the discovery budget.
+5. Select finding pairs, call `regenerateWitness`, write `test/Witness.t.sol`, and run the witness campaigns, then the replays (generating `Replay.t.sol` once the shrunk calldata is known).
+6. Build and write the report, and remove the directory.
+
+The directory is removed on success and kept on failure, and is never reused (decision 15). Every error in steps 1 to 5 leaves the directory in place for diagnosis, including the ABI-mismatch and autopsy errors, which can occur after `src/` has been written. No `test/` file is written before step 4, so a rejected autopsy report or ABI never produces séance inputs.
 
 The Entry_Point creates one `Deadline` when it starts (timeout default 300 s). `forge build`, discovery, every witness campaign, and every replay run each receive `phaseBudgetMs(deadline, now())` as their individual process timeout, so the total never exceeds the configured timeout. Time spent in `forge build` is therefore not available to later phases. The deadline has three different effects.
 
@@ -473,7 +534,7 @@ The Runner also checks that the legacy solc binary exists before `forge build` (
 
 ### Phase 2: witness shrinking (`foundry-json.ts`)
 
-For each selected (function, Classification) pair, the engine generates `Witness<k>` whose `setUp` is the same as discovery and additionally calls `handler.setWitness(string fn, Classifier.Class cls)`, where `fn` is the function name (the same string the handler writes as `function` in the record) and not a selector. The handler stores `keccak256(bytes(fn))` and sets `witnessHit = true` when it records a fuzz call (`idx >= 0`) with that function name and Classification and `afterDivergence == false`. `invariant_witness()` asserts `!handler.witnessHit()`. The witness campaign runs with `SEANCE_RECORD=0` and Foundry's default shrinking.
+After discovery, the Runner calls `regenerateWitness(project, abi, pairs)` with the selected pairs (decision 17) and writes the resulting `test/Witness.t.sol`. For each selected (function, Classification) pair, that file holds `Witness<k>` (k is the 1-based position in the selected list), whose `setUp` is the same as discovery and additionally calls `handler.setWitness(string fn, Classifier.Class cls)`, where `fn` is the function name (the same string the handler writes as `function` in the record) and not a selector. The handler stores `keccak256(bytes(fn))` and sets `witnessHit = true` when it records a fuzz call (`idx >= 0`) with that function name and Classification and `afterDivergence == false`. `invariant_witness()` asserts `!handler.witnessHit()`. The witness campaign runs with `SEANCE_RECORD=0` and Foundry's default shrinking.
 
 The engine reads the result from `forge test --json` and never parses text output. `parseCounterexample` iterates the `"<file>:<contract>"` keys of the top-level object and each entry's `test_results`, and finds the `invariant_witness` result. For a failed campaign, `counterexample.Sequence[1]` is the shrunk list of handler calls (each with the handler `calldata` in hex and the sender), and `counterexample.Sequence[0]` is the sequence length before shrinking. `counterexample: null` means the campaign did not fail.
 
@@ -589,7 +650,8 @@ interface SeanceReport {
     pairsUnshrunk: number; pairsOverCap: number; deadlineReached: boolean };
   // pairsFound = pairsSetup + pairsShrunk + pairsUnshrunk + pairsOverCap
   // pairsUnshrunk counts witness-not-failed, replay-mismatch, and deadline
-  unreachableSites: string[];
+  unreachableSites: string[];     // includes every site in a skipped function
+  skippedFunctions: { name: string; reason: "stack" }[];  // handler skipped for stack depth; sorted by name, no duplicates, [] when none
 }
 interface Finding {
   function: string;
@@ -616,13 +678,13 @@ Invariants: the four counts sum to `totalCalls`; keys are serialized in a fixed 
 
 ### Property 1: Project generation is deterministic
 
-*For any* valid séance input and target plan, generating the Foundry_Project twice produces the same set of relative paths with byte-identical contents.
+*For any* valid séance input, target plan, and witness-pair list, running `generateSrcProject`, `generateTestProject`, `generateProject`, or `regenerateWitness` twice on the same arguments produces the same set of relative paths with byte-identical contents.
 
 **Validates: Requirements 1.13**
 
 ### Property 2: Generated project layout, foundry.toml, and artifact names
 
-*For any* valid séance input and any `GeneratorOptions`, the generated file set includes `foundry.toml`, `src/legacy/Legacy<Name>.sol`, `src/port/Port<Name>.sol`, the handler, and the discovery test. The `foundry.toml` has no top-level `solc` key. It contains a legacy Compilation_Restriction whose `paths` is exactly the legacy source file and whose `version` is exactly the string `=<legacy solc version>` (with the leading `=`, never a bare version), and a port Compilation_Restriction whose `paths` is exactly the port source file and whose `version` is exactly `=0.8.28` (no range operator). When the legacy optimizer is enabled with runs `R`, the legacy restriction carries both `min_optimizer_runs = R` and `max_optimizer_runs = R` (including when `R = 0`), `additional_compiler_profiles` contains exactly one entry named `legacy_opt` with `optimizer = true` and `optimizer_runs = R`, and the default profile's `optimizer_runs` (`r0`) is never equal to `R` (`r0 = 1`, or `2` when `R = 1`). `min_optimizer_runs` and `max_optimizer_runs` appear only alongside that additional profile, and never one without the other. When the legacy optimizer is disabled, no `min_optimizer_runs`, no `max_optimizer_runs`, and no `additional_compiler_profiles` entry are emitted, and the default profile has `optimizer = false`. The restriction entries never contain the keys `profile`, `settings`, or `optimizer`. When `portSharesLegacyOptimizer` is set and the legacy optimizer is enabled, the port restriction also carries `min_optimizer_runs = R` and `max_optimizer_runs = R`; otherwise it carries neither. The `foundry.toml` sets `fs_permissions` to read on `./out` and read-write on `./seance-out` only, sets `[invariant]` `runs = 256` and `depth = 64`, and contains the pinned forge-std wiring: a `remappings.txt` that is exactly `forge-std/=<FORGE_STD_DIR>/src/` for the given `FORGE_STD_PIN` version and `forgeStdDir` option, `allow_paths = ["<FORGE_STD_DIR>"]`, and two further restrictions pinning `<FORGE_STD_DIR>/src/**` and `test/**` to `=0.8.28`, so that changing `FORGE_STD_PIN` or `forgeStdDir` changes the generated files, no generated file contains a path other than `<FORGE_STD_DIR>` regardless of the machine's local forge-std checkout location, and the same inputs always give byte-identical files. The generated project contains no `lib/` directory. The handler deploys the legacy contract with `vm.deployCode("Legacy<Name>.sol:<Name>", ...)` and the port with `vm.deployCode("Port<Name>.sol:<Name>", ...)`.
+*For any* valid séance input and any `GeneratorOptions`, the generated file set includes `foundry.toml`, `src/legacy/Legacy<Name>.sol`, `src/port/Port<Name>.sol`, the handler, and the discovery test. The `foundry.toml` has no top-level `solc` key. It contains a legacy Compilation_Restriction whose `paths` is exactly the legacy source file and whose `version` is exactly the string `=<legacy solc version>` (with the leading `=`, never a bare version), and a port Compilation_Restriction whose `paths` is exactly the port source file and whose `version` is exactly `=0.8.28` (no range operator). When the legacy optimizer is enabled with runs `R`, the legacy restriction carries both `min_optimizer_runs = R` and `max_optimizer_runs = R` (including when `R = 0`), `additional_compiler_profiles` contains exactly one entry named `legacy_opt` with `optimizer = true` and `optimizer_runs = R`, and the default profile's `optimizer_runs` (`r0`) is never equal to `R` (`r0 = 1`, or `2` when `R = 1`). `min_optimizer_runs` and `max_optimizer_runs` appear only alongside that additional profile, and never one without the other. When the legacy optimizer is disabled, no `min_optimizer_runs`, no `max_optimizer_runs`, and no `additional_compiler_profiles` entry are emitted, and the default profile has `optimizer = false`. The restriction entries never contain the keys `profile`, `settings`, or `optimizer`. When `portSharesLegacyOptimizer` is set and the legacy optimizer is enabled, the port restriction also carries `min_optimizer_runs = R` and `max_optimizer_runs = R`; otherwise it carries neither. The `foundry.toml` sets `fs_permissions` to read on `./out` and read-write on `./seance-out` only, sets `[invariant]` `runs = 256` and `depth = 64`, and contains the pinned forge-std wiring: a `remappings.txt` that is exactly `forge-std/=<FORGE_STD_DIR>/src/` for the given `FORGE_STD_PIN` version and `forgeStdDir` option, `allow_paths = ["<FORGE_STD_DIR>"]`, and two further restrictions pinning `<FORGE_STD_DIR>/src/**` and `test/**` to `=0.8.28`, so that changing `FORGE_STD_PIN` or `forgeStdDir` changes the generated files, no generated file contains a path other than `<FORGE_STD_DIR>` regardless of the machine's local forge-std checkout location, and the same inputs always give byte-identical files. The generated project contains no `lib/` directory. The handler deploys the legacy contract with `vm.deployCode("Legacy<Name>.sol:<Name>", ...)` and the port with `vm.deployCode("Port<Name>.sol:<Name>", ...)`. `foundry.toml` has no `via_ir` key. `generateProject` returns exactly the union of the `generateSrcProject` and `generateTestProject` files, and the stage 1 files do not depend on the ABI or the plan. `Targets.sol` sets `FUNDING_WEI` to `fundingWei` (0 when unset), and sets `HAS_TOKEN_SHARES` to true exactly when the ABI has both `transfer(address,uint256)` and `balanceOf(address)`. `regenerateWitness(project, abi, pairs)` returns a file list that differs from `project` only in `test/Witness.t.sol`, which holds exactly one `Witness<k>` contract per pair, k from 1 to the number of pairs, in order.
 
 **Validates: Requirements 1.1, 1.2, 1.3, 1.4, 1.5, 1.7**
 
@@ -640,7 +702,7 @@ Invariants: the four counts sum to `totalCalls`; keys are serialized in a fixed 
 
 ### Property 5: Handler coverage and parameter mapping match the ABI
 
-*For any* ABI, the generated handler exposes exactly one handler function for each non-constructor function with `nonpayable` or `payable` mutability, maps every `address` parameter to a `uint8` actor index resolved over the Actor_Set plus `address(0)`, maps every `address[]` parameter to a bounded length and an index pack, and the observable-state reader includes every no-argument `view`/`pure` function and every address-keyed public mapping getter for each ordered pair of Actor_Set addresses.
+*For any* ABI, the generated handler exposes exactly one handler function for each non-constructor function with `nonpayable` or `payable` mutability whose `estimateHandlerStack` does not exceed `MAX_HANDLER_STACK`, and no handler function for any such function that does. `computeSkippedFunctions(abi)` returns exactly the latter set as `{ name, reason: "stack" }` entries, sorted by name with no duplicates, and the report's `skippedFunctions` equals it (an empty list when none). The generated handler maps every `address` parameter to a `uint8` actor index resolved over the Actor_Set plus `address(0)`, maps every `address[]` parameter to a bounded length and an index pack, and the observable-state reader includes every no-argument `view`/`pure` function and every address-keyed public mapping getter for each ordered pair of Actor_Set addresses.
 
 **Validates: Requirements 3.3, 10.4**
 
@@ -712,7 +774,7 @@ Invariants: the four counts sum to `totalCalls`; keys are serialized in a fixed 
 
 ### Property 17: Every site gets bounded entries with correct slots, paired values stay together
 
-*For any* valid Autopsy_Report and ABI, every Arithmetic_Site has between 1 and 64 target entries, each entry's slot `headOffset` equals `4 + 32 * (head words of the preceding parameters)` (which is `4 + 32 * paramIndex` for scalar and dynamic-type predecessors), a slot targeting the length of a dynamic array has encoding `dynamicArrayLength` and one targeting a scalar has encoding `static`, every pair or array-length-times-value entry carries both of its assignments in a single entry (so one pick sets both), every seed sequence has at most 10 calls, and a site is flagged `unreachable` when it has no resolvable seed, or when every one of its entries has an empty `assignments` list (no operand could be mapped to a handler parameter). A site flagged for either reason still receives its entries, and a site whose operands cannot be mapped receives exactly one entry with an empty `assignments` list, so the 1..64 bound holds. The `siteId` of every unreachable site appears in the report's `unreachableSites`. An empty report yields an empty plan.
+*For any* valid Autopsy_Report and ABI, every Arithmetic_Site has between 1 and 64 target entries, each entry's slot `headOffset` equals `4 + 32 * (head words of the preceding parameters)` (which is `4 + 32 * paramIndex` for scalar and dynamic-type predecessors), a slot targeting the length of a dynamic array has encoding `dynamicArrayLength` and one targeting a scalar has encoding `static`, every pair or array-length-times-value entry carries both of its assignments in a single entry (so one pick sets both), every seed sequence has at most 10 calls, and a site is flagged `unreachable` when it has no resolvable seed, or when every one of its entries has an empty `assignments` list (no operand could be mapped to a handler parameter), or when its function is in the skipped set. No seed sequence contains a call to a skipped function. A site flagged for any of these reasons still receives its entries, and a site whose operands cannot be mapped receives exactly one entry with an empty `assignments` list, so the 1..64 bound holds. The `siteId` of every unreachable site appears in the report's `unreachableSites`. An empty report yields an empty plan.
 
 **Validates: Requirements 6.1, 6.7, 6.8, 6.10, 6.11, 6.12**
 
@@ -776,6 +838,8 @@ Invariants: the four counts sum to `totalCalls`; keys are serialized in a fixed 
 |---|---|---|
 | Missing inputs | `MISSING_INPUT` | One error naming all missing inputs; no run, no files. |
 | Invalid inputs | `INVALID_INPUT` | One error naming all invalid inputs; no run, no files. |
+| Port ABI differs from legacy ABI (function name plus ordered input types; `stateMutability`, outputs, events, constructor, fallback and receive are ignored) | `INVALID_INPUT` | Raised after `forge build`, so `src/` has been written and the directory is kept. The message lists every signature present on only one side. No `test/` file is written and no séance runs. |
+| Function over `MAX_HANDLER_STACK` | n/a | Not an error. No handler is generated, its sites are unreachable, and it is listed in `skippedFunctions`. If forge still reports "Stack too deep", the run ends in `BUILD_FAILED`. |
 | Autopsy empty, non-JSON, over 10 MB | `AUTOPSY_REJECTED` | Message states which condition; no séance inputs. |
 | Autopsy `schemaVersion` missing, unsupported, schema violations, unknown functions | `AUTOPSY_REJECTED` | Details list every violation or function. |
 | Legacy solc absent | `SOLC_MISSING` | Names the version; `forge build` not invoked. |
@@ -808,6 +872,9 @@ If the Foundry run leaves a truncated last line in `records.jsonl` (for example 
 **Example and edge-case tests (vitest):**
 - Generated handler uses `call{gas: GAS_CAP}` and `staticcall{gas: GAS_CAP}` for every deployment call and state read (item: gas cap), and contains no non-low-level call into a deployment.
 - Fallback handlers exist when the ABI has a `fallback` (3.6).
+- `compareAbis`: equal function entries with different `stateMutability`, parameter names, outputs, events, or constructor give no mismatch; a missing function, an extra function, or a changed input type gives `INVALID_INPUT` naming the signatures on one side only; overloads compare as multisets.
+- `estimateHandlerStack` and `MAX_HANDLER_STACK`: a function at the limit is generated and one above it is skipped, using fixtures built from the constant, so the test does not hard-code a number. A separate forge build of the largest generated handler without `via_ir` checks the constant against the compiler.
+- Runner order with a mock forge: `forge build` runs before any `test/` file is written, the ABI is read from the build output, and `forge test` for discovery runs after `generateTestProject`. `Witness.t.sol` is rewritten between discovery and the first witness campaign, and no other file is touched.
 - Token-share setup is emitted only when the ABI has both `transfer(address,uint256)` and `balanceOf(address)`.
 - `parseCounterexample` against fixtures captured from the pinned Foundry version (`engine/test/fixtures/forge-json/failing.json` and `passing.json`): the failing fixture gives `calls` from `Sequence[1]` and `originalLength` from `Sequence[0]`, the passing fixture (`counterexample: null`) gives `found: false`, a fixture with a different `"<file>:<contract>"` key still parses, and a malformed `Sequence` gives `SEANCE_FAILED`.
 - Two séances for the same input use two different project directories, and the Runner never starts forge in a directory that already contains `cache/invariant`.
@@ -855,3 +922,5 @@ If the Foundry run leaves a truncated last line in `records.jsonl` (for example 
 - **Native-only verification.** Tasks 1.5 and 1.7, which this `foundry.toml` scheme (top-level-solc-free restrictions, `additional_compiler_profiles` plus `min_optimizer_runs` and `max_optimizer_runs`, the forge-std and test restrictions) is based on, ran natively (forge 1.5.1-stable on the host, not the séance worker's linux/amd64 Docker image). Docker verification of the same scheme, including `--offline` behaviour with only the image's two pinned solc versions installed, is pending.
 - **Wall-clock time with recording on.** Discovery makes 256 x 64 = 16,384 counted handler calls, and Foundry's post-campaign replay of the final run adds 64 more recorded calls (16,448 lines in total, not counted in the report). Each call runs two deployment calls, a state read for each side, and one `vm.writeLine`, and every `vm.writeLine` goes through the `fs_permissions` check and a file append. Together with `vm.recordLogs` this may exceed the 300 s default timeout on slower machines, and a discovery timeout fails the run, and a slow first-time `forge build` (two solc versions, cold cache) also draws on the same deadline and leaves less time for discovery. The first Docker run measures the time per call and the total. Task 1.8 and task 8.3 measured full-scale (256 x 64) discovery natively: about 1.9 s on the token fixture (`batchTransfer` exorcised at fuzz call 2 and in all 257 sequences, 0 reverts) and about 20 s on the wallet fixture (13 s with `SEANCE_RECORD=0`; 25 state reads per side per call). State-read cost grows with the number of getters. The handler compares a keccak hash of each side's state first and runs the quadratic state diff only when the hashes differ. Mitigations, in order: (1) keep `runs = 256` and `depth = 64` and raise the default timeout for graveyard runs; (2) not available: buffering records in handler memory and writing them with `vm.writeFile` was rejected, because handler storage resets at the start of every run so the buffer would be lost, and it would not remove the duplicate replay run (decision 13); (3) write `stateFields` only for `port-bug` records (already the case) and drop the per-call state read when the call reverted on both sides; (4) lower `depth` while keeping `runs`, which must stay equal to the value reported in `report.runs` and `report.depth`.
 - The first witness campaign also runs 256 x 64 handler calls with recording off, per pair, and up to 10 pairs, so the shared deadline is more likely to cut witness and replay than discovery. This is the reason a deadline there is a reported outcome (`unshrunkReason: "deadline"`) and not an error.
+- **Handler stack limit (decision 19).** `MAX_HANDLER_STACK` and the weights in `estimateHandlerStack` are set from a compile experiment, and no value is fixed by this design. Without `via_ir`, a function with many compound parameters (for example several dynamic arrays, `bytes`, or `string` parameters) can exceed the limit. Such functions are not fuzzed: they get no handler, their Arithmetic_Sites are reported as unreachable, and they appear in `skippedFunctions`. This is a known coverage limitation, and an unfuzzed function can hide a divergence. `via_ir` was rejected because it slows every build, and build time is inside the 300 s deadline. If the estimator under-counts, `forge test` fails with "Stack too deep" and the run ends in `BUILD_FAILED`.
+- **ABI and ordering.** The ABI is read from forge output after `forge build`, so an autopsy rejection or an ABI mismatch is detected only after the `src/` build has used part of the deadline. The ABI match ignores constructor and fallback/receive differences on purpose (they surface as classified divergences), so a port that changes only those is not rejected up front.

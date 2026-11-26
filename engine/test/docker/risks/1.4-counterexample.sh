@@ -64,13 +64,29 @@ alt_seq=$(jq -cS "$calls_expr" alt.json 2>/dev/null)
 rm -rf "$edir"
 replayed=no; [ -n "$cache_file" ] && [ -n "$reuse_seq" ] && [ "$reuse_seq" = "$orig_seq" ] && replayed=yes
 alt_differs=no; [ "$alt_seq" != "$orig_seq" ] && alt_differs=yes
-# Cross-run comparison: whichever mode runs second compares against the other's sequence file.
-other=docker; [ "$MODE" = docker ] && other=native
-other_file="$FIND_DIR/1.4.$other.sequence.json"
-if [ ! -f "$other_file" ]; then cmp_result="not compared yet: $other run has not written $(basename "$other_file"); the $other run will compare when it runs second"
-elif [ "$(jq -r .seed "$other_file")" != "$SEED" ]; then cmp_result="not compared: $other sequence file was made with seed $(jq -r .seed "$other_file"), this run used $SEED"
-elif [ "$(jq -cS 'del(.seed)' "$other_file")" = "$(jq -cS 'del(.seed)' "$seq_file")" ]; then cmp_result="MATCH: native and docker shrunk sequences are identical for seed $SEED"
-else cmp_result="MISMATCH (finding, not a task failure) for seed $SEED. $other: $(jq -cS 'del(.seed)' "$other_file"); $MODE: $(jq -cS 'del(.seed)' "$seq_file")"; fi
+# Shape-only comparison with the native fixtures (engine/test/fixtures/forge-json/{failing,passing}.json).
+# Shrunk sequences are NOT compared: forge 1.5.1's fuzzer is not reproducible from a seed (task 1.11).
+# Projection: key sets and value types (arrays: the set of distinct element shapes, so lengths may differ).
+# traces and metrics key names depend on the run, so only their element shapes and the entry key set are compared.
+SHAPE='def sh: if type=="object" then with_entries(.value|=sh) elif type=="array" then (map(sh)|unique) else type end;
+  [.[]|{result_keys:(.test_results["invariant_witness()"]|keys), duration:(.duration|sh),
+        status:(.test_results["invariant_witness()"].status|type), reason:(.test_results["invariant_witness()"].reason|type),
+        counterexample:(.test_results["invariant_witness()"].counterexample|sh),
+        kind_keys:(.test_results["invariant_witness()"].kind|keys),
+        invariant_keys:(.test_results["invariant_witness()"].kind.Invariant|keys),
+        metrics_shapes:([.test_results["invariant_witness()"].kind.Invariant.metrics[]|sh]|unique)}]'
+NATIVE_FIX="${NATIVE_FIX_DIR:-/fixtures/forge-json}"
+[ -d "$NATIVE_FIX" ] || NATIVE_FIX="$FIXTURES_OUT"
+shape_cmp() { # name file
+  local nf="$NATIVE_FIX/$1.json" a b
+  [ -f "$nf" ] || { echo "no native fixture $nf"; return 1; }
+  a=$(jq -cS "$SHAPE" "$nf" 2>/dev/null); b=$(jq -cS "$SHAPE" "$2" 2>/dev/null)
+  [ -n "$a" ] && [ "$a" = "$b" ] && { echo "SAME"; return 0; }
+  echo "DIFFERENT. native: $a; $MODE: $b"; return 1
+}
+fail_shape=$(shape_cmp failing "$fail_json"); fail_shape_rc=$?
+pass_shape=$(shape_cmp passing "$pass_json"); pass_shape_rc=$?
+cmp_result="failing JSON shape vs native fixture: $fail_shape; passing JSON shape vs native fixture: $pass_shape"
 saved=no
 if [ "$MODE" = native ] && [ -n "${FIXTURES_OUT:-}" ] && [ "$fail_valid" = yes ] && [ "$pass_valid" = yes ]; then
   mkdir -p "$FIXTURES_OUT" && cp "$fail_json" "$FIXTURES_OUT/failing.json" && cp "$pass_json" "$FIXTURES_OUT/passing.json" && saved=yes
@@ -86,6 +102,10 @@ verdict=PASS; reasons=""
 [ "$all_hex" = true ] || { verdict=FAIL; reasons="$reasons not every call has hex calldata and a hex sender;"; }
 [ "$order_ok" = true ] || { verdict=FAIL; reasons="$reasons call order is not arm before fire ($funcs);"; }
 [ "$replayed" = yes ] || { verdict=FAIL; reasons="$reasons reused directory did not replay the cached failure (cache file: '$cache_file');"; }
+if [ "$MODE" != native ]; then
+  [ "$fail_shape_rc" -eq 0 ] || { verdict=FAIL; reasons="$reasons failing JSON shape differs from the native fixture;"; }
+  [ "$pass_shape_rc" -eq 0 ] || { verdict=FAIL; reasons="$reasons passing JSON shape differs from the native fixture;"; }
+fi
 { [ "$p_ce_type" = null ] && [ "$p_calls" = 0 ]; } || { verdict=FAIL; reasons="$reasons passing run counterexample type '$p_ce_type' with $p_calls calls;"; }
 
 {
@@ -104,7 +124,7 @@ verdict=PASS; reasons=""
   echo "- Call order (func_name): $funcs; arm before fire: $order_ok; all calls have hex calldata and 20-byte sender: $all_hex."
   echo "- Seed: \`--fuzz-seed $SEED\` for both fixtures (override with SEED). Each forge run used a fresh scratch copy."
   echo "- Negative check (reusing a directory): cache/invariant file present: $([ -n "$cache_file" ] && echo yes || echo no); rerun in the same directory with seed $ALT_SEED returned the identical shrunk calls (the cached failure was replayed): $replayed. On replay \`reason\` changed from '$fresh_reason' to '$reuse_reason' and Sequence[0] changed from $orig_len to $reuse_orig_len, so a replay's Sequence[0] is the shrunk length, not the pre-shrink length; this is why every séance needs a fresh directory. A fresh directory with seed $ALT_SEED gave a different sequence: $alt_differs (informational)."
-  echo "- Cross-run seed comparison: $cmp_result. The shrunk sequence is saved to \`findings/1.4.$MODE.sequence.json\`; whichever run happens second compares the two files (only when both used the same seed). Docker emulation affects timing only."
+  echo "- Shape-only comparison with the native fixtures (keys, value types, structure of \`counterexample.Sequence[1]\`; shrunk sequences are not compared, forge 1.5.1 is not seed-reproducible, see 1.11). Part of the verdict in Docker mode: $cmp_result. The shrunk sequence of this run is saved to \`findings/1.4.$MODE.sequence.json\` for the record only."
   echo "- Calls:"
   echo '```'
   echo "$calls_table"
