@@ -49,3 +49,11 @@ export function allowPathsToml(forgeStdDir: string = FORGE_STD_DEFAULT_DIR): str
   assertForgeStdDir(forgeStdDir);
   return `allow_paths = ["${forgeStdDir}"]`;
 }
+
+/**
+ * `shrink_run_limit = 0` in foundry.toml disables shrinking for the campaign.
+ * The witness re-run overrides it with this env var set to
+ * `WITNESS_SHRINK_RUN_LIMIT` (forge's default).
+ */
+export const SHRINK_RUN_LIMIT_ENV = "FOUNDRY_INVARIANT_SHRINK_RUN_LIMIT";
+export const WITNESS_SHRINK_RUN_LIMIT = 5000;

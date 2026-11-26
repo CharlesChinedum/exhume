@@ -5,7 +5,8 @@
  *
  * Scheme verified on forge 1.5.1 by tasks 1.5 and 1.7: no top-level `solc`,
  * every restriction pinned with an exact `=version`, the legacy optimizer
- * selected through `additional_compiler_profiles` plus `min_optimizer_runs`
+ * selected through `additional_compiler_profiles` plus
+ * `min_optimizer_runs = max_optimizer_runs = R`
  * (never `profile`, `settings` or `optimizer` keys in a restriction).
  */
 import {
@@ -27,7 +28,7 @@ export interface FoundryConfigOptions {
   legacyOptimizer: { enabled: boolean; runs?: number };
   /** `<FORGE_STD_DIR>`, default `/opt/forge-std`. */
   forgeStdDir?: string;
-  /** Adds the same `min_optimizer_runs = R` to the port restriction (only when the optimizer is enabled). */
+  /** Adds the same `min_optimizer_runs = max_optimizer_runs = R` to the port restriction (only when the optimizer is enabled). */
   portSharesLegacyOptimizer?: boolean;
 }
 
@@ -72,7 +73,10 @@ export function renderFoundryToml(opts: FoundryConfigOptions): Result<string> {
     }
   }
 
-  const minRuns = enabled ? `, min_optimizer_runs = ${runs}` : "";
+  // Both bounds are always emitted together. With only `min_optimizer_runs = 0`
+  // the default profile (optimizer = false, optimizer_runs = 1) also satisfies
+  // the restriction and forge picks it (seen on forge 1.5.1 with R = 0).
+  const minRuns = enabled ? `, min_optimizer_runs = ${runs}, max_optimizer_runs = ${runs}` : "";
   const portMinRuns = enabled && opts.portSharesLegacyOptimizer === true ? minRuns : "";
   const lines: string[] = [
     "[profile.default]",

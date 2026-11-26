@@ -12,6 +12,8 @@ import {
   INVARIANT_DEPTH,
   INVARIANT_RUNS,
   PORT_SOLC_VERSION,
+  SHRINK_RUN_LIMIT_ENV,
+  WITNESS_SHRINK_RUN_LIMIT,
   allowPathsToml,
   remappingsText,
 } from "../../src/seance/forge-std-pin.js";
@@ -71,6 +73,7 @@ describe("renderFoundryToml", () => {
       { paths: "test/**", version: "=0.8.28" },
     ]);
     expect(text).not.toContain("min_optimizer_runs");
+    expect(text).not.toContain("max_optimizer_runs");
     expect(text).not.toMatch(/version = "0\.4\.19"/);
   });
 
@@ -86,8 +89,20 @@ describe("renderFoundryToml", () => {
       paths: "src/legacy/LegacyToken.sol",
       version: "=0.4.19",
       min_optimizer_runs: R,
+      max_optimizer_runs: R,
     });
     expect(p.compilation_restrictions[1]).toEqual({ paths: "src/port/PortToken.sol", version: "=0.8.28" });
+  });
+
+  it("R=0 renders both bounds on the legacy restriction line", () => {
+    expect(render({ legacyOptimizer: { enabled: true, runs: 0 } })).toContain(
+      '{ paths = "src/legacy/LegacyToken.sol", version = "=0.4.19", min_optimizer_runs = 0, max_optimizer_runs = 0 },',
+    );
+  });
+
+  it("exports the witness shrink override", () => {
+    expect(SHRINK_RUN_LIMIT_ENV).toBe("FOUNDRY_INVARIANT_SHRINK_RUN_LIMIT");
+    expect(WITNESS_SHRINK_RUN_LIMIT).toBe(5000);
   });
 
   it("portSharesLegacyOptimizer adds min_optimizer_runs to the port only when enabled", () => {
@@ -96,9 +111,11 @@ describe("renderFoundryToml", () => {
       paths: "src/port/PortToken.sol",
       version: "=0.8.28",
       min_optimizer_runs: 200,
+      max_optimizer_runs: 200,
     });
     const off = render({ legacyOptimizer: { enabled: false }, portSharesLegacyOptimizer: true });
     expect(off).not.toContain("min_optimizer_runs");
+    expect(off).not.toContain("max_optimizer_runs");
   });
 
   it("fixed settings: fs_permissions, allow_paths, gas_limit, invariant", () => {
@@ -178,10 +195,14 @@ describe("renderFoundryToml", () => {
           if (enabled) {
             expect(p.optimizer_runs).not.toBe(R);
             expect(rs[0]!.min_optimizer_runs).toBe(R);
+            expect(rs[0]!.max_optimizer_runs).toBe(R);
             expect(rs[1]!.min_optimizer_runs).toBe(share ? R : undefined);
+            expect(rs[1]!.max_optimizer_runs).toBe(share ? R : undefined);
+            for (const r of rs) expect("min_optimizer_runs" in r).toBe("max_optimizer_runs" in r);
             expect(p.additional_compiler_profiles).toEqual([{ name: "legacy_opt", optimizer: true, optimizer_runs: R }]);
           } else {
             expect(text).not.toContain("min_optimizer_runs");
+            expect(text).not.toContain("max_optimizer_runs");
             expect(p.additional_compiler_profiles).toBeUndefined();
             expect(p.optimizer).toBe(false);
           }
@@ -200,13 +221,25 @@ const skipReason = !forgeOk ? "forge not on PATH" : !stdOk ? `forge-std checkout
 
 describe("forge build smoke", () => {
   it.skipIf(skipReason !== "")(`renders a foundry.toml that forge 1.5.1 builds (${skipReason || "runs"})`, () => {
-    for (const enabled of [false, true]) {
+    const cases: { runs: number | undefined; share: boolean }[] = [
+      { runs: undefined, share: false },
+      { runs: 0, share: false },
+      { runs: 1, share: false },
+      { runs: 200, share: false },
+      { runs: 0, share: true },
+    ];
+    for (const { runs, share } of cases) {
+      const enabled = runs !== undefined;
       const dir = mkdtempSync(join(tmpdir(), "exhume-foundry-"));
       try {
         cpSync(join(DOCKER, "fixtures/token"), dir, { recursive: true });
         writeFileSync(
           join(dir, "foundry.toml"),
-          render({ forgeStdDir: localStd, legacyOptimizer: enabled ? { enabled, runs: 200 } : { enabled } }),
+          render({
+            forgeStdDir: localStd,
+            legacyOptimizer: enabled ? { enabled, runs } : { enabled },
+            portSharesLegacyOptimizer: share,
+          }),
         );
         writeFileSync(join(dir, "remappings.txt"), remappingsText(localStd));
         const b = spawnSync("forge", ["build", "--offline"], { cwd: dir, encoding: "utf8" });
@@ -219,10 +252,11 @@ describe("forge build smoke", () => {
         const legacy = meta("LegacyToken.sol/Token.json");
         const port = meta("PortToken.sol/Token.json");
         expect(legacy.compiler.version.startsWith("0.4.19+")).toBe(true);
-        expect(legacy.settings.optimizer.enabled).toBe(enabled);
-        if (enabled) expect(legacy.settings.optimizer.runs).toBe(200);
+        if (enabled) expect(legacy.settings.optimizer).toEqual({ enabled: true, runs });
+        else expect(legacy.settings.optimizer.enabled).toBe(false);
         expect(port.compiler.version.startsWith("0.8.28+")).toBe(true);
-        expect(port.settings.optimizer.enabled).toBe(false);
+        if (share) expect(port.settings.optimizer).toEqual({ enabled: true, runs });
+        else expect(port.settings.optimizer.enabled).toBe(false);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
