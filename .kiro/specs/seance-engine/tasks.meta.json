@@ -473,6 +473,68 @@
         "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
         "timestamp": 1795705748192
       }
+    ],
+    "8.4 Write `templates/Seance.t.sol`, `Witness.t.sol`, and `Replay.t.sol`": [
+      {
+        "executionId": "d290ad8f-5773-42b3-9e9c-3616dd3134c3",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795705998016
+      },
+      {
+        "executionId": "d290ad8f-5773-42b3-9e9c-3616dd3134c3",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795706774552
+      }
+    ],
+    "5.1 Implement `inputs.ts`": [
+      {
+        "executionId": "d290ad8f-5773-42b3-9e9c-3616dd3134c3",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795706794750
+      },
+      {
+        "executionId": "d290ad8f-5773-42b3-9e9c-3616dd3134c3",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795706935936
+      }
+    ],
+    "5. Entry input validation": [
+      {
+        "executionId": "d290ad8f-5773-42b3-9e9c-3616dd3134c3",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795706935988
+      }
+    ],
+    "8.5 Implement `project-generator.ts`": [
+      {
+        "executionId": "d290ad8f-5773-42b3-9e9c-3616dd3134c3",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795706952179
+      },
+      {
+        "executionId": "d290ad8f-5773-42b3-9e9c-3616dd3134c3",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795707904569
+      }
+    ],
+    "8.8 Write the required forge tests: classifier vectors and the legacy assert gas cap": [
+      {
+        "executionId": "d290ad8f-5773-42b3-9e9c-3616dd3134c3",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795707910656
+      },
+      {
+        "executionId": "d290ad8f-5773-42b3-9e9c-3616dd3134c3",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795708196672
+      }
+    ],
+    "8. Project generator and Solidity templates": [
+      {
+        "executionId": "d290ad8f-5773-42b3-9e9c-3616dd3134c3",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795708196730
+      }
     ]
   }
 }

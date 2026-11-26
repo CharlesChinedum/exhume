@@ -4,87 +4,25 @@
  *   - fixtures/handler:        the docker token fixture (transfer, balanceOf, batchTransfer)
  *   - fixtures/handler-wallet: payable function and fallback, events, address-keyed getters, assert,
  *                              constructor argument
- * The SeanceDiscovery contracts in those directories are throwaway stand-ins for task 8.4.
+ * The discovery test is the real templates/Seance.t.sol (task 8.4), filled with the fixtures' selector parts.
  */
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { renderFoundryToml } from "../../src/seance/foundry-config.js";
-import { INVARIANT_DEPTH, INVARIANT_RUNS, remappingsText } from "../../src/seance/forge-std-pin.js";
+import { INVARIANT_DEPTH, INVARIANT_RUNS } from "../../src/seance/forge-std-pin.js";
 import { verifyTaint } from "../../src/seance/taint.js";
 import type { RecordLine } from "../../src/seance/types.js";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ENGINE = resolve(HERE, "../..");
-const TEMPLATES = join(ENGINE, "src/seance/templates");
-const TOKEN_FIXTURE = join(HERE, "fixtures/handler");
-const WALLET_FIXTURE = join(HERE, "fixtures/handler-wallet");
-const DOCKER_TOKEN = join(ENGINE, "test/docker/fixtures/token");
-const LOCAL_STD = join(ENGINE, "test/docker/.cache/forge-std");
-
-const forgeOk = spawnSync("forge", ["--version"], { encoding: "utf8" }).status === 0;
-const stdOk = existsSync(join(LOCAL_STD, "src/Test.sol"));
-const skipReason = !forgeOk ? "forge is not on PATH" : !stdOk ? `local forge-std checkout missing at ${LOCAL_STD}` : "";
-const FORGE_TIMEOUT = 240_000;
-
-const read = (p: string): string => readFileSync(p, "utf8");
-
-/** Replaces one whole marker line of the template. */
-function fill(template: string, marker: string, body: string): string {
-  const line = `    // @@${marker}@@\n`;
-  if (!template.includes(line)) throw new Error(`marker ${marker} not found`);
-  return template.replace(line, body.endsWith("\n") ? body : body + "\n");
-}
-
-interface Project {
-  dir: string;
-  /** Edits a file of the project in place. */
-  edit(rel: string, f: (s: string) => string): void;
-}
-
-function assemble(kind: "token" | "wallet"): Project {
-  const dir = mkdtempSync(join(tmpdir(), "exhume-handler-"));
-  const fx = kind === "token" ? TOKEN_FIXTURE : WALLET_FIXTURE;
-  const name = kind === "token" ? "Token" : "Wallet";
-  mkdirSync(join(dir, "src/legacy"), { recursive: true });
-  mkdirSync(join(dir, "src/port"), { recursive: true });
-  mkdirSync(join(dir, "test/handler"), { recursive: true });
-  if (kind === "token") {
-    cpSync(join(DOCKER_TOKEN, "src/legacy/LegacyToken.sol"), join(dir, "src/legacy/LegacyToken.sol"));
-    cpSync(join(DOCKER_TOKEN, "src/port/PortToken.sol"), join(dir, "src/port/PortToken.sol"));
-    cpSync(join(fx, "HandlerUnit.t.sol"), join(dir, "test/HandlerUnit.t.sol"));
-    cpSync(join(fx, "WitnessProbe.t.sol"), join(dir, "test/WitnessProbe.t.sol"));
-  } else {
-    cpSync(join(fx, "LegacyWallet.sol"), join(dir, "src/legacy/LegacyWallet.sol"));
-    cpSync(join(fx, "PortWallet.sol"), join(dir, "src/port/PortWallet.sol"));
-  }
-  cpSync(join(TEMPLATES, "Classifier.sol"), join(dir, "test/handler/Classifier.sol"));
-  cpSync(join(fx, "Targets.sol"), join(dir, "test/handler/Targets.sol"));
-  cpSync(join(fx, "SeanceDiscovery.t.sol"), join(dir, "test/SeanceDiscovery.t.sol"));
-  let handler = read(join(TEMPLATES, "Handler.sol"));
-  handler = fill(handler, "SEED_ENCODER", read(join(fx, "seed-encoder.part.sol")));
-  handler = fill(handler, "HANDLER_FUNCTIONS", read(join(fx, "handler-functions.part.sol")));
-  writeFileSync(join(dir, "test/handler/DifferentialHandler.sol"), handler);
-  const toml = renderFoundryToml({
-    contractName: name,
-    legacySolcVersion: "0.4.19",
-    legacyOptimizer: { enabled: false },
-    forgeStdDir: LOCAL_STD,
-  });
-  if (!toml.ok) throw new Error(toml.error.message);
-  writeFileSync(join(dir, "foundry.toml"), toml.value);
-  writeFileSync(join(dir, "remappings.txt"), remappingsText(LOCAL_STD));
-  return {
-    dir,
-    edit(rel, f) {
-      const p = join(dir, rel);
-      writeFileSync(p, f(read(p)));
-    },
-  };
-}
+import {
+  FORGE_TIMEOUT,
+  TEMPLATES,
+  TOKEN_FIXTURE,
+  WALLET_FIXTURE,
+  assemble,
+  read,
+  skipReason,
+  type Project,
+} from "./template-project.js";
 
 interface Run {
   status: number | null;
@@ -276,25 +214,6 @@ describe.skipIf(skipReason !== "")(`Handler.sol template on forge (${skipReason 
         const r = runForge(p, ["--match-contract", "HandlerUnitTest"]);
         expect(r.status, r.output.slice(-3000)).toBe(0);
         expect(r.output).toMatch(/6 passed; 0 failed/);
-      } finally {
-        rmSync(p.dir, { recursive: true, force: true });
-      }
-    },
-    FORGE_TIMEOUT,
-  );
-
-  it(
-    "setWitness: an observed (function, class) pair fails invariant_witness, an absent pair passes",
-    () => {
-      const p = assemble("token");
-      try {
-        const hit = runForge(p, ["--match-contract", "^WitnessHit$"], SMALL);
-        expect(hit.status, hit.output.slice(-2000)).not.toBe(0);
-        expect(hit.output).toMatch(/FAIL/);
-        expect(hit.output).toContain("invariant_witness");
-        const miss = runForge(p, ["--match-contract", "^WitnessMiss$"], SMALL);
-        expect(miss.status, miss.output.slice(-2000)).toBe(0);
-        expect(miss.output).toMatch(/\[PASS\] invariant_witness/);
       } finally {
         rmSync(p.dir, { recursive: true, force: true });
       }

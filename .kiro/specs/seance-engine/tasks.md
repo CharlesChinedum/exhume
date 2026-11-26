@@ -241,8 +241,8 @@ compilation_restrictions = [
     - **Property 19: Autopsy rejection is ordered and exhaustive**
     - **Validates: Requirements 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8, 11.10**
 
-- [ ] 5. Entry input validation
-  - [ ] 5.1 Implement `inputs.ts`
+- [x] 5. Entry input validation
+  - [x] 5.1 Implement `inputs.ts`
     - Implement `validateInput` collecting every missing field (`MISSING_INPUT`) or every invalid field (`INVALID_INPUT`) in one error: contract name 1..128 chars, boolean optimizer, optimizer runs 0..4294967295 only when enabled, sources non-empty and at most 1 MiB, solc version `0.x.y` with minor below 8, `0x` runtime code.
     - _Requirements: 1.12, 12.4, 12.5_
 
@@ -309,7 +309,7 @@ compilation_restrictions = [
     - **Property 15: Unknown-operand multiplication pairs overflow and wrap**
     - **Validates: Requirements 6.3, 6.4, 6.5, 6.6**
 
-- [ ] 8. Project generator and Solidity templates
+- [x] 8. Project generator and Solidity templates
   - [x] 8.1 Implement `forge-std-pin.ts` and `foundry-config.ts`
     - Export `FORGE_STD_PIN`, `INVARIANT_RUNS = 256`, `INVARIANT_DEPTH = 64`, the `remappings.txt` text, and the `allow_paths` text. `foundry-config.ts` renders `foundry.toml` (`compilation_restrictions`, legacy optimizer profile, `fs_permissions`, `gas_limit`, `[invariant]`). Adjust to any change recorded by task 1.
     - `FORGE_STD_DIR` is a generator parameter, default `/opt/forge-std` (the Docker image path). Generated files contain the parameter value and never a local checkout path.
@@ -335,11 +335,11 @@ compilation_restrictions = [
     - Address arguments in seed calls (the seed-sequence runner in `init`/`setUp`, and the generator that emits seed sequences into `Targets.sol`) are Actor_Set indices written as decimal strings. The handler decodes each one as an index into the Actor_Set (through `_addr`), not as a literal address.
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 3.1, 3.2, 3.3, 3.5, 3.6, 3.7, 3.8, 5.1, 5.3, 5.5, 6.9, 10.4_
 
-  - [ ] 8.4 Write `templates/Seance.t.sol`, `Witness.t.sol`, and `Replay.t.sol`
+  - [x] 8.4 Write `templates/Seance.t.sol`, `Witness.t.sol`, and `Replay.t.sol`
     - `SeanceDiscovery` with the single `invariant_discovery`; `Witness1..10` with `invariant_witness`; `SeanceReplay1..10` each with its own output path and `test_replay`.
     - _Requirements: 2.4, 3.1, 8.1, 8.2_
 
-  - [ ] 8.5 Implement `project-generator.ts`
+  - [x] 8.5 Implement `project-generator.ts`
     - Implement `generateProject` (pure and deterministic, sorted paths, LF newlines, `Targets.sol` constants, no `lib/`) and `writeProject` (validate first, then write; no files for invalid input). Also expose a function that regenerates only `Replay.t.sol` from shrunk calldata.
     - _Requirements: 1.1, 1.2, 1.5, 1.6, 1.7, 1.12, 1.13_
 
@@ -364,7 +364,7 @@ compilation_restrictions = [
     - **Property 6: The discovery test targets only the handler**
     - **Validates: Requirements 2.4, 3.1, 3.3, 10.4**
 
-  - [ ] 8.8 Write the required forge tests: classifier vectors and the legacy assert gas cap
+  - [x] 8.8 Write the required forge tests: classifier vectors and the legacy assert gas cap
     - Run natively with forge 1.5.1 and in the Docker image.
     - `Classifier.sol` against the shared vectors in `engine/test/vectors/classification.json`, so the Solidity classifier matches the TypeScript one. The forge parity test reads that file and runs only vectors whose `scope` is `"both"` (or absent). It skips `ts-only` vectors (the malformed-record vectors), because a Solidity Call_Record is built from typed EVM values and cannot be malformed, so the test must not depend on how `vm.parseJson` handles bad input. State keys are enumerated with `vm.parseJsonKeys`. `differingFields` are compared as sorted by bytes (state field names are ASCII, so UTF-16 order equals byte order).
     - In the shared vectors, every `both` vector must have topics of exactly 32 bytes and non-SELF emitters of exactly 20 bytes, because `Classifier.sol` takes `bytes32` topics and `address` emitters (EVM topics are always 32 bytes). The vitest test in 6.2 enforces this rule. The `both` vectors' short topics (such as `0x01` and `0xAB`) were rewritten as full left-padded 32-byte words.
