@@ -14,12 +14,20 @@ import { classify } from "../../src/seance/classify.js";
 interface Vector {
   name: string;
   description: string;
+  scope: "ts-only" | "both";
   legacy: unknown;
   port: unknown;
   expect: { classification: string; invalidRecord: boolean; differingFields: string[] };
 }
 
 const all = vectors.vectors as Vector[];
+
+/**
+ * Selects the vectors a Solidity parity test must run: every vector whose scope
+ * is "both" (an absent scope also means "both"). ts-only vectors are malformed
+ * records that cannot be expressed as typed EVM values, so forge skips them.
+ */
+export const parityVectors = (vs: readonly Vector[]): Vector[] => vs.filter((v) => (v.scope ?? "both") === "both");
 
 const success = (r: unknown): boolean => (r as { success: boolean }).success;
 const data = (r: unknown): string => (r as { data: string }).data.toLowerCase();
@@ -46,22 +54,47 @@ describe("classification vectors", () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
+  const ROWS = [
+    "malformed",
+    "revert/revert identical",
+    "revert/revert differing",
+    "success/revert Panic(0x11)",
+    "success/revert other",
+    "revert/success",
+    "success/success equal",
+    "success/success differing",
+  ];
+
   it("covers every classification and every decision-table row", () => {
     expect(new Set(all.map((v) => v.expect.classification))).toEqual(
       new Set(["match", "reason-modernised", "exorcised", "port-bug"]),
     );
-    expect(new Set(all.map(row))).toEqual(
-      new Set([
-        "malformed",
-        "revert/revert identical",
-        "revert/revert differing",
-        "success/revert Panic(0x11)",
-        "success/revert other",
-        "revert/success",
-        "success/success equal",
-        "success/success differing",
-      ]),
-    );
+    expect(new Set(all.map(row))).toEqual(new Set(ROWS));
+  });
+
+  it("covers every decision-table row except malformed among both-scope vectors", () => {
+    expect(new Set(parityVectors(all).map(row))).toEqual(new Set(ROWS.filter((r) => r !== "malformed")));
+  });
+
+  it("gives every vector an explicit scope of ts-only or both", () => {
+    for (const v of all) expect(["ts-only", "both"], v.name).toContain(v.scope);
+  });
+
+  it("is ts-only exactly when the record is malformed", () => {
+    for (const v of all) {
+      expect(v.scope === "ts-only", v.name).toBe(v.expect.invalidRecord === true);
+    }
+    const tsOnly = all.filter((v) => v.scope === "ts-only").length;
+    const invalid = all.filter((v) => v.expect.invalidRecord === true).length;
+    expect(tsOnly).toBe(invalid);
+    expect(parityVectors(all).length).toBe(all.length - invalid);
+    console.log(`scopes: ts-only=${tsOnly}, both=${all.length - tsOnly}`);
+  });
+
+  it("keeps null records in ts-only vectors", () => {
+    for (const v of all) {
+      if (v.legacy === null || v.port === null) expect(v.scope, v.name).toBe("ts-only");
+    }
   });
 
   it("lists expected differingFields sorted, unique, and empty unless a valid port-bug", () => {

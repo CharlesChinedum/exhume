@@ -1,10 +1,11 @@
 {
   "version": 1,
-  "notes": "Shared by engine/test/seance/classification-vectors.test.ts and the generated Classifier.sol forge test (vm.parseJson / stdJson). legacy and port use the in-process CallRecord shape: success (boolean), data (0x hex), logs ([{emitter, topics, data}], emitter is 'SELF' or an address), state (object name -> 0x hex value, as in the TS CallRecord). Solidity consumers must enumerate state keys with vm.parseJsonKeys and read each value by its key; keys such as 'allowed(0xA1,0xA2)' contain parentheses and commas, so use the key returned by parseJsonKeys, not a hand-built JSONPath. A null legacy/port, a missing field, or a wrongly typed field stands for a malformed record; Solidity consumers should treat a vector whose record fails to decode as malformed (invalidRecord true, empty differingFields). expect.classification is one of match, reason-modernised, exorcised, port-bug; expect.differingFields is sorted (UTF-16 order) and unique.",
+  "notes": "Shared by engine/test/seance/classification-vectors.test.ts and the generated Classifier.sol forge test (vm.parseJson / stdJson). legacy and port use the in-process CallRecord shape: success (boolean), data (0x hex), logs ([{emitter, topics, data}], emitter is 'SELF' or an address), state (object name -> 0x hex value, as in the TS CallRecord). Solidity consumers must enumerate state keys with vm.parseJsonKeys and read each value by its key; keys such as 'allowed(0xA1,0xA2)' contain parentheses and commas, so use the key returned by parseJsonKeys, not a hand-built JSONPath. Each vector has an explicit scope: 'both' (checked by the TypeScript classifier and by the Solidity forge parity test for Classifier.sol) or 'ts-only' (checked only by the TypeScript classifier); the default when scope is absent is 'both'. In Solidity a Call_Record is built from typed EVM values and cannot be malformed, so the forge parity test must skip ts-only vectors rather than rely on how vm.parseJson handles bad input. Every ts-only vector is a malformed-record vector (expect.invalidRecord true, empty differingFields): a null legacy/port, a missing field, or a wrongly typed field. A null record occurs only in ts-only vectors. expect.classification is one of match, reason-modernised, exorcised, port-bug; expect.differingFields is sorted (UTF-16 order) and unique.",
   "vectors": [
     {
       "name": "match/both-succeed-equal",
       "description": "Decision table: both succeed with equal data, logs and state.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -32,6 +33,7 @@
     {
       "name": "match/both-succeed-hex-case-insensitive",
       "description": "Hex digits compare as bytes, so 0xAB equals 0xab in data and state.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0xAB",
@@ -57,6 +59,7 @@
     {
       "name": "match/both-succeed-empty-data",
       "description": "Both succeed with empty return data.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x",
@@ -84,6 +87,7 @@
     {
       "name": "match/both-succeed-empty-state",
       "description": "Both succeed with an empty state map and no logs.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -105,6 +109,7 @@
     {
       "name": "match/both-succeed-equal-logs",
       "description": "Equal logs including a SELF emitter, multiple topics and empty data.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -164,6 +169,7 @@
     {
       "name": "match/log-hex-case-insensitive",
       "description": "Log topics and data compare case-insensitively.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -207,6 +213,7 @@
     {
       "name": "match/log-same-address-emitter",
       "description": "A non-SELF emitter matches the identical address, in any hex case.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -250,6 +257,7 @@
     {
       "name": "match/log-self-emitter-both-sides",
       "description": "SELF on both sides is the same emitter (each side's own deployment).",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -293,6 +301,7 @@
     {
       "name": "match/both-revert-identical",
       "description": "Both revert with identical non-empty data.",
+      "scope": "both",
       "legacy": {
         "success": false,
         "data": "0x08c379a0",
@@ -314,6 +323,7 @@
     {
       "name": "match/both-revert-empty",
       "description": "Both revert with empty data.",
+      "scope": "both",
       "legacy": {
         "success": false,
         "data": "0x",
@@ -335,6 +345,7 @@
     {
       "name": "match/both-revert-identical-hex-case",
       "description": "Revert data equal up to hex case is identical.",
+      "scope": "both",
       "legacy": {
         "success": false,
         "data": "0xAB",
@@ -356,6 +367,7 @@
     {
       "name": "match/both-revert-panic-identical",
       "description": "Both revert with Panic(0x11): identical data, so match, not exorcised.",
+      "scope": "both",
       "legacy": {
         "success": false,
         "data": "0x4e487b710000000000000000000000000000000000000000000000000000000000000011",
@@ -377,6 +389,7 @@
     {
       "name": "match/reverted-calls-ignore-logs-and-state",
       "description": "A reverted pair ignores logs and state entirely.",
+      "scope": "both",
       "legacy": {
         "success": false,
         "data": "0x01",
@@ -410,6 +423,7 @@
     {
       "name": "reason-modernised/both-revert-differing",
       "description": "Both revert with different non-empty data.",
+      "scope": "both",
       "legacy": {
         "success": false,
         "data": "0x01",
@@ -431,6 +445,7 @@
     {
       "name": "reason-modernised/legacy-empty-port-nonempty",
       "description": "Empty versus non-empty revert data, legacy empty.",
+      "scope": "both",
       "legacy": {
         "success": false,
         "data": "0x",
@@ -452,6 +467,7 @@
     {
       "name": "reason-modernised/legacy-nonempty-port-empty",
       "description": "Empty versus non-empty revert data, port empty.",
+      "scope": "both",
       "legacy": {
         "success": false,
         "data": "0x01",
@@ -473,6 +489,7 @@
     {
       "name": "reason-modernised/legacy-empty-port-panic",
       "description": "Legacy empty revert (old assert/require) versus port Panic(0x11): both revert, so reason-modernised.",
+      "scope": "both",
       "legacy": {
         "success": false,
         "data": "0x",
@@ -494,6 +511,7 @@
     {
       "name": "reason-modernised/legacy-panic-port-empty",
       "description": "Legacy Panic(0x11) revert versus empty port revert.",
+      "scope": "both",
       "legacy": {
         "success": false,
         "data": "0x4e487b710000000000000000000000000000000000000000000000000000000000000011",
@@ -515,6 +533,7 @@
     {
       "name": "reason-modernised/differ-by-one-byte",
       "description": "Revert data differing in a single byte.",
+      "scope": "both",
       "legacy": {
         "success": false,
         "data": "0x0102030405",
@@ -536,6 +555,7 @@
     {
       "name": "reason-modernised/differ-by-length",
       "description": "Revert data where one is a prefix of the other.",
+      "scope": "both",
       "legacy": {
         "success": false,
         "data": "0x0102",
@@ -557,6 +577,7 @@
     {
       "name": "reason-modernised/ignores-state-and-logs",
       "description": "Reverted pair with differing data and differing state and logs is still reason-modernised with no fields.",
+      "scope": "both",
       "legacy": {
         "success": false,
         "data": "0x01",
@@ -590,6 +611,7 @@
     {
       "name": "exorcised/legacy-ok-port-panic-0x11",
       "description": "Legacy succeeds, port reverts with exactly Panic(0x11).",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -614,6 +636,7 @@
     {
       "name": "exorcised/panic-uppercase-hex",
       "description": "Uppercase hex digits in the Panic encoding are still exact (the 0x prefix stays lowercase).",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -638,6 +661,7 @@
     {
       "name": "exorcised/panic-mixed-case-hex",
       "description": "Mixed-case hex digits in the Panic encoding.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -662,6 +686,7 @@
     {
       "name": "exorcised/ignores-legacy-logs-and-state",
       "description": "Exorcised ignores the legacy side's logs, state and return data.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0xdeadbeef",
@@ -693,6 +718,7 @@
     {
       "name": "exorcised/legacy-empty-return-data",
       "description": "Legacy succeeds with empty return data, port Panic(0x11).",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x",
@@ -717,6 +743,7 @@
     {
       "name": "port-bug/panic-35-bytes",
       "description": "Panic encoding one byte short (35 bytes) is not Panic(0x11).",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -744,6 +771,7 @@
     {
       "name": "port-bug/panic-37-bytes",
       "description": "Panic encoding with a trailing byte (37 bytes).",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -771,6 +799,7 @@
     {
       "name": "port-bug/panic-wrong-selector",
       "description": "Selector 4e487b72 instead of 4e487b71.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -798,6 +827,7 @@
     {
       "name": "port-bug/panic-wrong-code-0x12",
       "description": "Panic(0x12) (division by zero) is not Panic(0x11).",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -825,6 +855,7 @@
     {
       "name": "port-bug/panic-selector-only",
       "description": "Only the 4-byte Panic selector.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -852,6 +883,7 @@
     {
       "name": "port-bug/port-revert-empty-vs-legacy-data",
       "description": "Legacy ok with data 0x01, port reverts empty: data differs.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -879,6 +911,7 @@
     {
       "name": "port-bug/legacy-ok-port-revert-same-data",
       "description": "Legacy return data equals port revert data: only success is listed.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -905,6 +938,7 @@
     {
       "name": "port-bug/legacy-ok-port-revert-differing-data",
       "description": "Legacy ok, port reverts with different data: success and returnData.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -932,6 +966,7 @@
     {
       "name": "port-bug/legacy-ok-port-revert-ignores-logs-state",
       "description": "One-sided outcomes never list logs or state.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -965,6 +1000,7 @@
     {
       "name": "port-bug/legacy-revert-port-ok-same-data",
       "description": "Legacy revert data equals port return data: only success.",
+      "scope": "both",
       "legacy": {
         "success": false,
         "data": "0x01",
@@ -991,6 +1027,7 @@
     {
       "name": "port-bug/legacy-revert-port-ok-differing-data",
       "description": "Legacy reverts empty, port returns 0x01: success and returnData.",
+      "scope": "both",
       "legacy": {
         "success": false,
         "data": "0x",
@@ -1018,6 +1055,7 @@
     {
       "name": "port-bug/legacy-revert-port-ok-ignores-logs-state",
       "description": "Legacy revert, port ok with logs and state: still only success.",
+      "scope": "both",
       "legacy": {
         "success": false,
         "data": "0x01",
@@ -1051,6 +1089,7 @@
     {
       "name": "port-bug/legacy-panic-revert-port-ok",
       "description": "Legacy reverted with a Panic(0x11)-shaped payload and port succeeded: still a port-bug.",
+      "scope": "both",
       "legacy": {
         "success": false,
         "data": "0x4e487b710000000000000000000000000000000000000000000000000000000000000011",
@@ -1078,6 +1117,7 @@
     {
       "name": "port-bug/return-data-differs",
       "description": "Both succeed, only return data differs.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1107,6 +1147,7 @@
     {
       "name": "port-bug/return-data-empty-vs-nonempty",
       "description": "Both succeed, empty versus non-empty return data.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x",
@@ -1136,6 +1177,7 @@
     {
       "name": "port-bug/single-allowed-value-differs",
       "description": "A single differing allowed(owner,spender) value is a port-bug naming only that state key.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1165,6 +1207,7 @@
     {
       "name": "port-bug/balance-differs",
       "description": "Only the balance state value differs.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1194,6 +1237,7 @@
     {
       "name": "port-bug/state-key-missing-on-port",
       "description": "A state key present on legacy only is a difference.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1222,6 +1266,7 @@
     {
       "name": "port-bug/state-key-extra-on-port",
       "description": "A state key present on port only is a difference.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1250,6 +1295,7 @@
     {
       "name": "port-bug/state-fields-sorted",
       "description": "Several differing state keys come back sorted in UTF-16 code unit order (uppercase before lowercase).",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1283,6 +1329,7 @@
     {
       "name": "port-bug/state-key-named-returnData",
       "description": "A state key named returnData is reported as state.returnData, never colliding with returnData.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1310,6 +1357,7 @@
     {
       "name": "port-bug/state-key-named-logs-and-success",
       "description": "State keys named logs and success are prefixed.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1340,6 +1388,7 @@
     {
       "name": "port-bug/data-logs-and-state-together",
       "description": "Return data, logs and one state key all differ: fixed names and prefixed key, sorted.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1379,6 +1428,7 @@
     {
       "name": "port-bug/logs-count-differs",
       "description": "Different number of logs.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1431,6 +1481,7 @@
     {
       "name": "port-bug/logs-order-differs",
       "description": "Same logs in a different order.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1490,6 +1541,7 @@
     {
       "name": "port-bug/log-topics-differ",
       "description": "Same log count, differing topic.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1537,6 +1589,7 @@
     {
       "name": "port-bug/log-topic-count-differs",
       "description": "Differing topic count.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1583,6 +1636,7 @@
     {
       "name": "port-bug/log-data-differs",
       "description": "Differing log data.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1628,6 +1682,7 @@
     {
       "name": "port-bug/log-emitter-self-vs-address",
       "description": "SELF on one side and an address on the other differ.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1673,6 +1728,7 @@
     {
       "name": "port-bug/log-emitter-address-vs-self",
       "description": "An address on legacy and SELF on the port differ.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1718,6 +1774,7 @@
     {
       "name": "port-bug/log-emitter-different-addresses",
       "description": "Two different non-SELF emitter addresses differ.",
+      "scope": "both",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1763,6 +1820,7 @@
     {
       "name": "malformed/legacy-missing-success",
       "description": "Malformed legacy record (missing-success) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": {
         "data": "0x",
         "logs": [],
@@ -1786,6 +1844,7 @@
     {
       "name": "malformed/legacy-non-boolean-success-string",
       "description": "Malformed legacy record (non-boolean-success-string) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": {
         "success": "true",
         "data": "0x01",
@@ -1813,6 +1872,7 @@
     {
       "name": "malformed/legacy-non-boolean-success-number",
       "description": "Malformed legacy record (non-boolean-success-number) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": {
         "success": 1,
         "data": "0x01",
@@ -1840,6 +1900,7 @@
     {
       "name": "malformed/legacy-missing-data",
       "description": "Malformed legacy record (missing-data) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "logs": [],
@@ -1863,6 +1924,7 @@
     {
       "name": "malformed/legacy-unprefixed-data",
       "description": "Malformed legacy record (unprefixed-data) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0102",
@@ -1890,6 +1952,7 @@
     {
       "name": "malformed/legacy-odd-length-data",
       "description": "Malformed legacy record (odd-length-data) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0x123",
@@ -1917,6 +1980,7 @@
     {
       "name": "malformed/legacy-non-hex-data",
       "description": "Malformed legacy record (non-hex-data) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0xzz",
@@ -1944,6 +2008,7 @@
     {
       "name": "malformed/legacy-unprefixed-state-value",
       "description": "Malformed legacy record (unprefixed-state-value) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1970,6 +2035,7 @@
     {
       "name": "malformed/legacy-odd-length-state-value",
       "description": "Malformed legacy record (odd-length-state-value) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -1996,6 +2062,7 @@
     {
       "name": "malformed/legacy-non-string-state-value",
       "description": "Malformed legacy record (non-string-state-value) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -2022,6 +2089,7 @@
     {
       "name": "malformed/legacy-unprefixed-log-topic",
       "description": "Malformed legacy record (unprefixed-log-topic) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -2057,6 +2125,7 @@
     {
       "name": "malformed/legacy-odd-length-log-data",
       "description": "Malformed legacy record (odd-length-log-data) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -2090,6 +2159,7 @@
     {
       "name": "malformed/legacy-log-topics-not-array",
       "description": "Malformed legacy record (log-topics-not-array) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -2123,6 +2193,7 @@
     {
       "name": "malformed/legacy-log-emitter-not-address-or-self",
       "description": "Malformed legacy record (log-emitter-not-address-or-self) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -2156,6 +2227,7 @@
     {
       "name": "malformed/legacy-log-missing-data",
       "description": "Malformed legacy record (log-missing-data) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -2188,6 +2260,7 @@
     {
       "name": "malformed/legacy-missing-logs",
       "description": "Malformed legacy record (missing-logs) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0x",
@@ -2211,6 +2284,7 @@
     {
       "name": "malformed/legacy-missing-state",
       "description": "Malformed legacy record (missing-state) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0x",
@@ -2234,6 +2308,7 @@
     {
       "name": "malformed/legacy-null-record",
       "description": "Malformed legacy record (null-record) against a valid port: port-bug, invalidRecord, no differing fields.",
+      "scope": "ts-only",
       "legacy": null,
       "port": {
         "success": true,
@@ -2253,6 +2328,7 @@
     {
       "name": "malformed/port-missing-success",
       "description": "Malformed port record: missing success.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -2276,6 +2352,7 @@
     {
       "name": "malformed/port-unprefixed-data",
       "description": "Malformed port record: unprefixed data.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -2303,6 +2380,7 @@
     {
       "name": "malformed/port-odd-length-data",
       "description": "Malformed port record: odd-length data.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -2330,6 +2408,7 @@
     {
       "name": "malformed/port-bad-log",
       "description": "Malformed port record: bad log topics.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0x01",
@@ -2363,6 +2442,7 @@
     {
       "name": "malformed/both-malformed",
       "description": "Both records malformed.",
+      "scope": "ts-only",
       "legacy": {
         "data": "0x",
         "logs": [],
@@ -2386,6 +2466,7 @@
     {
       "name": "malformed/legacy-malformed-port-revert",
       "description": "Malformed legacy record against a reverting port: invalid, not exorcised.",
+      "scope": "ts-only",
       "legacy": {
         "success": true,
         "data": "0x123",
@@ -2407,6 +2488,7 @@
     {
       "name": "malformed/revert-with-unprefixed-data",
       "description": "A reverted record's data is also strictly validated.",
+      "scope": "ts-only",
       "legacy": {
         "success": false,
         "data": "deadbeef",
@@ -2428,6 +2510,7 @@
     {
       "name": "malformed/revert-with-odd-length-data",
       "description": "Odd-length revert data is malformed even when both sides are identical.",
+      "scope": "ts-only",
       "legacy": {
         "success": false,
         "data": "0x123",
@@ -2449,6 +2532,7 @@
     {
       "name": "malformed/malformed-state-in-reverted-record",
       "description": "Even a reverted record with a malformed state value is malformed.",
+      "scope": "ts-only",
       "legacy": {
         "success": false,
         "data": "0x01",

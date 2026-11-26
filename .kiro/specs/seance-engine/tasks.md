@@ -257,9 +257,10 @@ compilation_restrictions = [
 
   - [x] 6.2 Create the shared classification vectors
     - Write `engine/test/vectors/classification.json` covering every row of the decision table, empty versus non-empty revert data, a single differing `allowed` value, and malformed records. A vitest example test runs them against `classify`.
+    - Each vector has a `scope` field, either `"both"` or `"ts-only"`. The 27 malformed-record vectors (those expecting `invalidRecord`) are `ts-only`. The vitest test also checks that every `invalidRecord` vector is `ts-only`.
     - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 10.5_
 
-  - [ ] 6.3 Write property test for the decision table
+  - [x] 6.3 Write property test for the decision table
     - **Property 8: Classification follows the decision table**
     - **Validates: Requirements 3.4, 3.8, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 10.5**
 
@@ -321,6 +322,7 @@ compilation_restrictions = [
 
   - [ ] 8.2 Write `templates/Classifier.sol`
     - Solidity mirror of `classify`, including the `Panic(0x11)` check, deterministic and pure.
+    - It mirrors only the vectors whose `scope` is `"both"` (or absent). In Solidity a Call_Record is built from typed EVM values and cannot be malformed, so `ts-only` vectors (the malformed-record vectors) have no Solidity counterpart and the template does not handle them.
     - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9_
 
   - [ ] 8.3 Write `templates/Handler.sol`
@@ -358,7 +360,7 @@ compilation_restrictions = [
 
   - [ ] 8.8 Write the required forge tests: classifier vectors and the legacy assert gas cap
     - Run natively with forge 1.5.1 and in the Docker image.
-    - `Classifier.sol` against the shared vectors in `engine/test/vectors/classification.json`, so the Solidity classifier matches the TypeScript one.
+    - `Classifier.sol` against the shared vectors in `engine/test/vectors/classification.json`, so the Solidity classifier matches the TypeScript one. The forge parity test reads that file and runs only vectors whose `scope` is `"both"` (or absent). It skips `ts-only` vectors (the malformed-record vectors), because a Solidity Call_Record is built from typed EVM values and cannot be malformed, so the test must not depend on how `vm.parseJson` handles bad input. State keys are enumerated with `vm.parseJsonKeys`. `differingFields` are compared as sorted by bytes (state field names are ASCII, so UTF-16 order equals byte order).
     - A fixture whose legacy contract hits an `assert` (invalid opcode) returns control to the handler within `GAS_CAP`, the handler records the call, and the séance continues.
     - _Requirements: 3.7, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.9_
 
