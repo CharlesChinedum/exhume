@@ -237,6 +237,12 @@ export interface SiteTargets {
   siteId: string;
   functionName: string;
   entries: TargetEntry[]; // 1..64
+  /**
+   * True when no seed sequence is resolvable, or when every entry has an empty
+   * `assignments` list (no operand could be mapped to a handler parameter).
+   * The site keeps its entries either way. The Report_Builder lists such sites
+   * in `unreachableSites`.
+   */
   unreachable: boolean;
 }
 

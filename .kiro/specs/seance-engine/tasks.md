@@ -285,16 +285,17 @@ compilation_restrictions = [
     - Includes the `selectFindingPairs` checks, so this test runs after task 9.2.
     - **Validates: Requirements 5.5, 8.4**
 
-- [ ] 7. Targeted-value input generator
+- [x] 7. Targeted-value input generator
   - [x] 7.1 Implement `input-generator.ts`
     - Implement `generateTargets` with the rules table (`x * k`, `a + b`, `a - b`, `x * y`, `x ** y`, array length times value), narrower-type widths, ParamSlot computation (`static` and `dynamicArrayLength`), paired assignments in one entry, seed sequences of at most 10 calls, and `unreachable` sites. Cap entries at 64 per site. Use `bigint` throughout.
+    - When every entry of a site has an empty assignments list, the generator sets `unreachable: true` for that site so it appears in `unreachableSites`. Cover this with a unit test that builds such a site and checks the flag and the `unreachableSites` entry.
     - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.10, 6.11, 6.12_
 
-  - [ ] 7.2 Write property test for multiplication targets
+  - [x] 7.2 Write property test for multiplication targets
     - **Property 13: Multiplication targets overflow and wrap**
     - **Validates: Requirements 6.2, 6.6, 6.13**
 
-  - [ ] 7.3 Write property test for array-length-times-value pairs
+  - [x] 7.3 Write property test for array-length-times-value pairs
     - **Property 16: Array length times value pairs overflow and wrap**
     - **Validates: Requirements 6.8, 6.14**
 
@@ -308,7 +309,7 @@ compilation_restrictions = [
     - **Validates: Requirements 6.3, 6.4, 6.5, 6.6**
 
 - [ ] 8. Project generator and Solidity templates
-  - [ ] 8.1 Implement `forge-std-pin.ts` and `foundry-config.ts`
+  - [x] 8.1 Implement `forge-std-pin.ts` and `foundry-config.ts`
     - Export `FORGE_STD_PIN`, `INVARIANT_RUNS = 256`, `INVARIANT_DEPTH = 64`, the `remappings.txt` text, and the `allow_paths` text. `foundry-config.ts` renders `foundry.toml` (`compilation_restrictions`, legacy optimizer profile, `fs_permissions`, `gas_limit`, `[invariant]`). Adjust to any change recorded by task 1.
     - `FORGE_STD_DIR` is a generator parameter, default `/opt/forge-std` (the Docker image path). Generated files contain the parameter value and never a local checkout path.
     - Emit the scheme verified by risks 1.5 and 1.7:
@@ -327,6 +328,7 @@ compilation_restrictions = [
 
   - [ ] 8.3 Write `templates/Handler.sol`
     - Implement the `DifferentialHandler` template: Actor_Set with the deployer, `_addr`, `init` (deploy by artifact name with identical constructor args and funding, constructor outcome classification, token shares, seed sequences), `_pickTarget`, typed handler functions per the parameter mapping table, fallback handlers, `_differential` (stopped check, `idx`-derived warp and roll, `vm.deal` before each side for payable calls, capped `call` and `staticcall`, classification, taint, JSONL record), `setOutputPath`, `setWitness`, and Observable_State reading including address-keyed mapping getters.
+    - Address arguments in seed calls (the seed-sequence runner in `init`/`setUp`, and the generator that emits seed sequences into `Targets.sol`) are Actor_Set indices written as decimal strings. The handler decodes each one as an index into the Actor_Set (through `_addr`), not as a literal address.
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 3.1, 3.2, 3.3, 3.5, 3.6, 3.7, 3.8, 5.1, 5.3, 5.5, 6.9, 10.4_
 
   - [ ] 8.4 Write `templates/Seance.t.sol`, `Witness.t.sol`, and `Replay.t.sol`

@@ -388,11 +388,15 @@ export function generateTargets(report: AutopsyReport, abi: AbiFunction[]): Resu
         seedSequences.push(seed.calls);
       }
     }
+    const entries = targetsFor(site, fn);
+    // Unreachable when no seed is resolvable, or when no operand mapped to a handler parameter
+    // (every entry has empty assignments; the entry list then is the single empty entry).
+    const allEmpty = entries.every((e) => e.assignments.length === 0);
     sites.push({
       siteId: site.id,
       functionName: site.function,
-      entries: targetsFor(site, fn),
-      unreachable: seed.unreachable,
+      entries,
+      unreachable: seed.unreachable || allEmpty,
     });
   }
   return ok({ sites, seedSequences });

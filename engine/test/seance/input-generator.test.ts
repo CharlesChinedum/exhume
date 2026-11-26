@@ -64,6 +64,14 @@ describe("array length times value (BEC)", () => {
     });
   });
 
+  it("is ordered by n ascending: first entry is (2, 2^255); 19 entries have len 2..20", () => {
+    const [len, val] = t.entries[0]!.assignments;
+    expect(len!.value).toBe(2n);
+    expect(val!.value).toBe(1n << 255n);
+    expect(t.entries.filter((e) => e.assignments[0]!.value <= 20n)).toHaveLength(19);
+    expect(t.unreachable).toBe(false);
+  });
+
   it("uses dynamicArrayLength for param 0 and static for param 1 with correct head offsets", () => {
     const [len, val] = t.entries[0]!.assignments;
     expect(len!.slot).toEqual({ encoding: "dynamicArrayLength", paramIndex: 0, headOffset: 4 });
@@ -206,6 +214,36 @@ describe("cap, empty, unreachable, seeds, determinism", () => {
   it("operand that cannot be mapped to a slot still gets one entry", () => {
     const t = one(site("s", "f", "*", { kind: "unknown", type: "uint256" }, known(5)), TOKEN_ABI);
     expect(t.entries).toEqual([{ assignments: [] }]);
+  });
+
+  it("unmappable operands (unknown, address) give one empty entry and unreachable: true", () => {
+    const abi = [fn("a", [["who", "address"], ["x", "uint256"]]), ...TOKEN_ABI];
+    const u = one(site("s1", "f", "*", { kind: "unknown", type: "uint256" }, known(5)), TOKEN_ABI);
+    expect(u.entries).toEqual([{ assignments: [] }]);
+    expect(u.unreachable).toBe(true);
+    const ad = one(site("s2", "a", "+", known(1), param("who", "address")), abi);
+    expect(ad.entries).toEqual([{ assignments: [] }]);
+    expect(ad.unreachable).toBe(true);
+  });
+
+  it("a site with a mapped assignment is not unreachable for the empty-assignment reason", () => {
+    const t = one(site("s", "f", "*", param("x"), known(5)), TOKEN_ABI);
+    expect(t.entries.every((e) => e.assignments.length > 0)).toBe(true);
+    expect(t.unreachable).toBe(false);
+  });
+
+  it("a partly mapped pair (one operand unknown) keeps a non-empty entry and is not marked", () => {
+    const abi = [fn("p", [["x", "uint256"]])];
+    const t = one(site("s", "p", "+", param("x"), { kind: "unknown", type: "uint256" }), abi);
+    expect(t.entries.some((e) => e.assignments.length > 0)).toBe(true);
+    expect(t.unreachable).toBe(false);
+  });
+
+  it("both unreachable causes OR together", () => {
+    const t = one(site("s", "f", "*", { kind: "unknown", type: "uint256" }, known(5), [{ kind: "approve" }]), TOKEN_ABI);
+    expect(t.unreachable).toBe(true);
+    const seedOnly = one(site("s", "f", "*", param("x"), known(5), [{ kind: "approve" }]), TOKEN_ABI);
+    expect(seedOnly.unreachable).toBe(true);
   });
 
   it("is deterministic", () => {

@@ -190,7 +190,14 @@ export interface SiteTargets {
   siteId: string;
   functionName: string;
   entries: TargetEntry[];        // 1..64
-  unreachable: boolean;
+  unreachable: boolean;          // true when no seed is resolvable, or when every entry has an empty assignments list
+}
+// One call of a seed sequence. It runs through the same differential path as a fuzz call.
+export interface SeedCall {
+  function: string;              // ABI function name
+  actorIdx: string;              // sender: decimal string, an index into ACTORS (0..3); 0 is the deployer
+  value?: string;                // decimal wei, payable functions only
+  args: string[];                // one decimal string per ABI parameter, see below
 }
 // One entry is one atomic choice: all of its assignments are applied together.
 export interface TargetEntry {
@@ -227,6 +234,10 @@ Rules (`M = 2^N`, `N` = bit width of the narrowest operand type):
 | array length `n` times value | for `n` in 2..24, `(n, ceil(M/n))` |
 
 Seed sequences come from the Autopsy site's precondition hints (constructor-set balance, `approve`, prior `transfer`). A site with no resolvable seed is flagged `unreachable: true` and still gets entries (Requirements 6.10 to 6.12).
+
+**SeedCall arguments.** Every entry of `SeedCall.args` is a decimal string. An `address` argument is an Actor_Set index written as a decimal string, never a raw address. The valid range is `"0"` to `"4"`: `"0"` to `"3"` select `ACTORS[0..3]` (`[DEPLOYER, A1, A2, A3]`) and `"4"` selects `address(0)`, the same range the handler's `_addr(uint8 i)` accepts (`ACTORS[i % (ACTORS.length + 1)]`, with the extra index mapping to `address(0)`). The handler decodes an address argument by parsing the string as a `uint8` and passing it to `_addr`. `SeedCall.actorIdx` is the sender and uses the sender range `"0"` to `"3"` (`ACTORS[idx % ACTORS.length]`, never `address(0)`). Non-address arguments are decimal integers, and `bool` is `"0"` or `"1"`. Seed calls hold no address literals, so the generated files stay free of machine-specific data.
+
+**Empty-assignment entries.** When no operand of a site could be mapped to a handler parameter (for example the operand is a state variable or a local, and not a parameter or an array length), the generator produces a single entry with an empty `assignments` list, so the 1..64 floor still holds. When every entry of a site has an empty `assignments` list, the generator sets `unreachable: true` for that site, in addition to the no-resolvable-seed rule above. The handler ignores an entry with no assignments: if `_pickTarget` selects such an entry, the call uses fuzzed values for every parameter. The Report_Builder fills `SeanceReport.unreachableSites` with the `siteId` of every `SiteTargets` whose `unreachable` is true, whatever the reason, in the order of the Autopsy_Report's sites and without duplicates.
 
 ### Project_Generator (`project-generator.ts`)
 
@@ -697,7 +708,7 @@ Invariants: the four counts sum to `totalCalls`; keys are serialized in a fixed 
 
 ### Property 17: Every site gets bounded entries with correct slots, paired values stay together
 
-*For any* valid Autopsy_Report and ABI, every Arithmetic_Site has between 1 and 64 target entries, each entry's slot `headOffset` equals `4 + 32 * (head words of the preceding parameters)` (which is `4 + 32 * paramIndex` for scalar and dynamic-type predecessors), a slot targeting the length of a dynamic array has encoding `dynamicArrayLength` and one targeting a scalar has encoding `static`, every pair or array-length-times-value entry carries both of its assignments in a single entry (so one pick sets both), every seed sequence has at most 10 calls, and a site with no resolvable seed is flagged unreachable while still receiving entries. An empty report yields an empty plan.
+*For any* valid Autopsy_Report and ABI, every Arithmetic_Site has between 1 and 64 target entries, each entry's slot `headOffset` equals `4 + 32 * (head words of the preceding parameters)` (which is `4 + 32 * paramIndex` for scalar and dynamic-type predecessors), a slot targeting the length of a dynamic array has encoding `dynamicArrayLength` and one targeting a scalar has encoding `static`, every pair or array-length-times-value entry carries both of its assignments in a single entry (so one pick sets both), every seed sequence has at most 10 calls, and a site is flagged `unreachable` when it has no resolvable seed, or when every one of its entries has an empty `assignments` list (no operand could be mapped to a handler parameter). A site flagged for either reason still receives its entries, and a site whose operands cannot be mapped receives exactly one entry with an empty `assignments` list, so the 1..64 bound holds. The `siteId` of every unreachable site appears in the report's `unreachableSites`. An empty report yields an empty plan.
 
 **Validates: Requirements 6.1, 6.7, 6.8, 6.10, 6.11, 6.12**
 
