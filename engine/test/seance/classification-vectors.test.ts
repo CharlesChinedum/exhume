@@ -106,6 +106,26 @@ describe("classification vectors", () => {
     }
   });
 
+  it("keeps both-scope topics 32 bytes, emitters 20 bytes, and state/data even-length hex", () => {
+    const evenHex = /^0x(?:[0-9a-fA-F]{2})*$/;
+    for (const v of parityVectors(all)) {
+      for (const side of ["legacy", "port"] as const) {
+        const r = v[side] as {
+          data: string;
+          logs: { emitter: string; topics: string[]; data: string }[];
+          state: Record<string, string>;
+        };
+        const at = `${v.name} [${side}]`;
+        expect(r.data, `${at} data`).toMatch(evenHex);
+        for (const [k, s] of Object.entries(r.state)) expect(s, `${at} state ${k}`).toMatch(evenHex);
+        for (const l of r.logs) {
+          expect(l.data, `${at} log data`).toMatch(evenHex);
+          if (l.emitter !== "SELF") expect(l.emitter, `${at} emitter ${l.emitter}`).toMatch(/^0x[0-9a-fA-F]{40}$/);
+          for (const t of l.topics) expect(t, `${at} topic ${t}`).toMatch(/^0x[0-9a-fA-F]{64}$/);
+        }
+      }
+    }
+  });
   it.each(all.map((v) => [v.name, v] as const))("%s", (_name, v) => {
     expect(classify(v.legacy, v.port)).toEqual(v.expect);
   });

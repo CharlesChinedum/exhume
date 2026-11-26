@@ -258,6 +258,7 @@ compilation_restrictions = [
   - [x] 6.2 Create the shared classification vectors
     - Write `engine/test/vectors/classification.json` covering every row of the decision table, empty versus non-empty revert data, a single differing `allowed` value, and malformed records. A vitest example test runs them against `classify`.
     - Each vector has a `scope` field, either `"both"` or `"ts-only"`. The 27 malformed-record vectors (those expecting `invalidRecord`) are `ts-only`. The vitest test also checks that every `invalidRecord` vector is `ts-only`.
+    - Topic and emitter width rule for `both` vectors: the vitest test checks that every topic of a `both` vector is exactly 32 bytes and every non-SELF emitter is exactly 20 bytes. `ts-only` vectors are exempt.
     - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 10.5_
 
   - [x] 6.3 Write property test for the decision table
@@ -329,7 +330,7 @@ compilation_restrictions = [
     - It mirrors only the vectors whose `scope` is `"both"` (or absent). In Solidity a Call_Record is built from typed EVM values and cannot be malformed, so `ts-only` vectors (the malformed-record vectors) have no Solidity counterpart and the template does not handle them.
     - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9_
 
-  - [ ] 8.3 Write `templates/Handler.sol`
+  - [x] 8.3 Write `templates/Handler.sol`
     - Implement the `DifferentialHandler` template: Actor_Set with the deployer, `_addr`, `init` (deploy by artifact name with identical constructor args and funding, constructor outcome classification, token shares, seed sequences), `_pickTarget`, typed handler functions per the parameter mapping table, fallback handlers, `_differential` (stopped check, `idx`-derived warp and roll, `vm.deal` before each side for payable calls, capped `call` and `staticcall`, classification, taint, JSONL record), `setOutputPath`, `setWitness`, and Observable_State reading including address-keyed mapping getters.
     - Address arguments in seed calls (the seed-sequence runner in `init`/`setUp`, and the generator that emits seed sequences into `Targets.sol`) are Actor_Set indices written as decimal strings. The handler decodes each one as an index into the Actor_Set (through `_addr`), not as a literal address.
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 3.1, 3.2, 3.3, 3.5, 3.6, 3.7, 3.8, 5.1, 5.3, 5.5, 6.9, 10.4_
@@ -366,6 +367,7 @@ compilation_restrictions = [
   - [ ] 8.8 Write the required forge tests: classifier vectors and the legacy assert gas cap
     - Run natively with forge 1.5.1 and in the Docker image.
     - `Classifier.sol` against the shared vectors in `engine/test/vectors/classification.json`, so the Solidity classifier matches the TypeScript one. The forge parity test reads that file and runs only vectors whose `scope` is `"both"` (or absent). It skips `ts-only` vectors (the malformed-record vectors), because a Solidity Call_Record is built from typed EVM values and cannot be malformed, so the test must not depend on how `vm.parseJson` handles bad input. State keys are enumerated with `vm.parseJsonKeys`. `differingFields` are compared as sorted by bytes (state field names are ASCII, so UTF-16 order equals byte order).
+    - In the shared vectors, every `both` vector must have topics of exactly 32 bytes and non-SELF emitters of exactly 20 bytes, because `Classifier.sol` takes `bytes32` topics and `address` emitters (EVM topics are always 32 bytes). The vitest test in 6.2 enforces this rule. The `both` vectors' short topics (such as `0x01` and `0xAB`) were rewritten as full left-padded 32-byte words.
     - A fixture whose legacy contract hits an `assert` (invalid opcode) returns control to the handler within `GAS_CAP`, the handler records the call, and the séance continues.
     - _Requirements: 3.7, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.9_
 

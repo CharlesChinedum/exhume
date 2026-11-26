@@ -388,6 +388,8 @@ State keys are prefixed `state.<name>`, so they cannot collide with the fixed na
 
 **Shared vector scope.** Each vector in `engine/test/vectors/classification.json` has a `scope` of `"both"` or `"ts-only"`. The 27 malformed-record vectors (those with `invalidRecord` true) are `"ts-only"`: in Solidity a Call_Record is built from typed EVM values and cannot be malformed, so the forge parity test for `Classifier.sol` skips `"ts-only"` vectors and does not depend on how `vm.parseJson` handles bad input. The vitest suite checks that every vector with `invalidRecord` true has `scope` `"ts-only"`, and that every decision-table row above appears among the `"both"` vectors.
 
+A `"both"` vector's log topics are exactly 32 bytes and its non-`SELF` emitters are exactly 20 bytes, because EVM topics are always 32 bytes and `Classifier.sol` takes `bytes32` topics and `address` emitters. The TypeScript vector test enforces this. `"ts-only"` vectors are exempt, because they may use malformed widths on purpose.
+
 ### Taint (`taint.ts`)
 
 ```ts
