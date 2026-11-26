@@ -1,0 +1,44 @@
+# linux/amd64 image that runs the TypeScript Runner/CLI (task 13.3). Build context: the repository root:
+#   docker build --platform linux/amd64 -f engine/test/docker/Dockerfile.seance -t exhume-seance .
+# Node 24 and pnpm 11.25.0 (root package.json "packageManager"), Foundry exactly 1.5.1, solc 0.4.19 and 0.8.28
+# pre-installed, forge-std at /opt/forge-std. The sources are COPIED in at build time (no bind-mounted /work, so
+# the image's node_modules are not hidden); only graveyard/ is bind-mounted at run time, at /graveyard.
+# The forge-only engine/test/docker/Dockerfile is unchanged.
+FROM --platform=linux/amd64 node:24-bookworm-slim
+ARG FOUNDRY_VERSION=1.5.1
+ARG PNPM_VERSION=11.25.0
+ARG FORGE_STD_PIN=v1.9.4
+ARG SOLC_LEGACY=0.4.19
+ARG SOLC_MODERN=0.8.28
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends bash ca-certificates curl git jq \
+ && rm -rf /var/lib/apt/lists/*
+RUN npm install -g "pnpm@${PNPM_VERSION}" && pnpm -v | grep -qx "${PNPM_VERSION}"
+ENV HOME=/root
+ENV PATH=/root/.foundry/bin:$PATH
+RUN curl -fsSL https://foundry.paradigm.xyz | bash \
+ && foundryup --install "${FOUNDRY_VERSION}" \
+ && forge --version | tee /tmp/forge-version \
+ && grep -Eq "^forge Version: ${FOUNDRY_VERSION//./\\.}(-|\$)" /tmp/forge-version \
+ && rm /tmp/forge-version
+RUN git clone --quiet https://github.com/foundry-rs/forge-std /opt/forge-std \
+ && git -C /opt/forge-std -c advice.detachedHead=false checkout --quiet "${FORGE_STD_PIN}"
+RUN mkdir /tmp/warm/ && cd /tmp/warm \
+ && mkdir src \
+ && printf 'pragma solidity =%s;\ncontract Old { uint256 public x; }\n' "${SOLC_LEGACY}" > src/Old.sol \
+ && printf '// SPDX-License-Identifier: UNLICENSED\npragma solidity =%s;\ncontract New { uint256 public x; }\n' "${SOLC_MODERN}" > src/New.sol \
+ && forge build \
+ && grep -q "\"version\":\"${SOLC_LEGACY}+" out/Old.sol/Old.json \
+ && grep -q "\"version\":\"${SOLC_MODERN}+" out/New.sol/New.json \
+ && cd / && rm -rf /tmp/warm
+WORKDIR /app
+# Dependency layer: manifests only, so source edits do not reinstall.
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY engine/package.json engine/
+RUN pnpm install --frozen-lockfile
+COPY engine/ engine/
+ENV SEANCE_FORGE_STD_DIR=/opt/forge-std
+WORKDIR /app/engine
+# Run: docker run --rm --platform linux/amd64 -v "$PWD/graveyard:/graveyard" exhume-seance accept-bec --graveyard-root /graveyard
+ENTRYPOINT ["pnpm", "seance", "--"]

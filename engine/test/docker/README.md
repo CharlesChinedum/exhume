@@ -24,6 +24,17 @@ at forge-std) and exits non-zero on failure. Environment variables:
 `MODE` (`native` or `docker`), `RISK_NAME`, `FIXTURE_DIR`, `SCRATCH`,
 `FORGE_STD_DIR`, and `FINDINGS_FILE` (the file to write).
 
+### Native-only scripts
+
+A script whose header (first 15 lines) contains the line
+`# harness: native-only` is not executed in Docker mode. The loop in `lib.sh`
+prints `SKIP (native-only): <script>` and does not count it as a failure, so
+`run-risks.sh` exits 0 when every other script passes. As a fallback, a script
+that exits 2 in Docker mode is also reported as skipped. In native mode these
+scripts run normally and any non-zero exit (including 1.11's exit 1 on
+non-determinism) still counts as a failure, as before. `risks/1.11-seed-determinism.sh`
+carries the marker.
+
 With no scripts in `risks/`, both harnesses print a notice and exit 0.
 
 ## Notes

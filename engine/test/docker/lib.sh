@@ -33,23 +33,37 @@ run_all() {
     echo "NOTICE: no risk scripts found in $HERE/risks/ (tasks 1.2 to 1.9 add them); nothing to run."
     return 0
   fi
-  local failed=0 s name scratch
+  local failed=0 skipped=0 s name scratch rc
   for s in "${scripts[@]}"; do
     name="$(basename "$s" .sh)"
+    # Convention: a script whose first 15 lines contain `# harness: native-only`
+    # is not executed in Docker mode; it is reported as skipped, not failed.
+    if [ "$MODE" = docker ] && head -n 15 "$s" | grep -Eq '^#[[:space:]]*harness:[[:space:]]*native-only[[:space:]]*$'; then
+      echo "SKIP (native-only): $name.sh"
+      skipped=$((skipped + 1))
+      continue
+    fi
     scratch="$(mktemp -d)"
     make_scratch "$scratch"
     echo "== [$MODE] $name (scratch: $scratch)"
-    if (cd "$scratch" && \
-        MODE="$MODE" RISK_NAME="$name" SCRATCH="$scratch" FIXTURE_DIR="$scratch" \
-        FORGE_STD_DIR="$FORGE_STD_DIR" \
-        FINDINGS_FILE="$HERE/findings/$name.$MODE.md" \
-        bash "$s"); then
+    rc=0
+    (cd "$scratch" && \
+      MODE="$MODE" RISK_NAME="$name" SCRATCH="$scratch" FIXTURE_DIR="$scratch" \
+      FORGE_STD_DIR="$FORGE_STD_DIR" \
+      FINDINGS_FILE="$HERE/findings/$name.$MODE.md" \
+      bash "$s") || rc=$?
+    if [ "$rc" -eq 0 ]; then
       echo "== [$MODE] $name: exit 0"
+    elif [ "$rc" -eq 2 ] && [ "$MODE" = docker ]; then
+      # Fallback: exit 2 in Docker mode means "native only" (marker missing).
+      echo "SKIP (native-only): $name.sh (exit 2)"
+      skipped=$((skipped + 1))
     else
-      echo "== [$MODE] $name: FAILED" >&2
+      echo "== [$MODE] $name: FAILED (exit $rc)" >&2
       failed=$((failed + 1))
     fi
     rm -rf "$scratch"
   done
+  echo "== [$MODE] summary: failed=$failed skipped=$skipped"
   [ "$failed" -eq 0 ]
 }

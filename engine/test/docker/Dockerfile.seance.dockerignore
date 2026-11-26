@@ -1,0 +1,11 @@
+**/node_modules
+.git
+.kiro
+web
+worker
+graveyard
+engine/test/docker/.cache
+engine/test/docker/findings
+**/out
+**/cache
+**/seance-out

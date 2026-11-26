@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1",
+  "contract": "BecToken",
+  "sites": [
+    {
+      "id": "batchTransfer:cnt*_value",
+      "function": "batchTransfer",
+      "operator": "*",
+      "operands": [
+        { "kind": "arrayLength", "name": "_receivers", "type": "uint256" },
+        { "kind": "param", "name": "_value", "type": "uint256" }
+      ],
+      "location": { "file": "BecToken.sol", "line": 257, "column": 22 },
+      "precondition": [
+        {
+          "kind": "constructor-balance",
+          "hint": "The deployer holds the whole supply; the wrapped product must not exceed the sender's balance."
+        }
+      ]
+    }
+  ]
+}

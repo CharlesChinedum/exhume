@@ -36,7 +36,7 @@ Key design decisions:
 
 13. **The record file ends with a replay tail, which the Report_Builder strips and verifies.** Task 1.2 found that Foundry 1.5.1 replays the final invariant run's calls once after the campaign. With `runs = 256` and `depth = 64` the record file therefore holds `runs * depth + depth` fuzz lines (16,448, plus the setup lines), and the last `depth` lines are an exact copy of the `depth` lines before them (probe: `runs = 10`, `depth = 5` gave 55). The Report_Builder keeps the first `INVARIANT_RUNS` sequences, counted by `idx == 0` starts, and treats every line after them as the replay tail. It verifies that the tail is an exact copy of the last kept sequence and fails with `SEANCE_FAILED` naming the first difference if not. The tail is never counted. The buffered `vm.writeFile` fallback was rejected: handler storage resets at the start of every run, so an in-memory buffer would be lost between runs, and buffering would not remove the duplicate run anyway. `vm.writeLine` and the scoped `fs_permissions` work as designed, and writes outside `./seance-out` are rejected.
 
-14. **The witness result is read from `counterexample.Sequence[1]`.** Task 1.4 found the `forge test --json` shape: the top-level object is keyed by `"<file>:<contract>"`, each entry has `test_results`, and a failed invariant's `counterexample` is an object whose `Sequence` is a two-element array. `Sequence[0]` is the sequence length before shrinking, and `Sequence[1]` is the list of shrunk handler calls. A passing campaign has `counterexample: null`. `parseCounterexample` iterates the top-level keys and each entry's `test_results` rather than assuming a fixed file or contract key, keeps `Sequence[0]` as `originalLength`, and treats `null` as "no counterexample" (the pair is reported `unshrunk` with `unshrunkReason: "witness-not-failed"`).
+14. **The witness result is read from `counterexample.Sequence[1]`.** Task 1.4 found the `forge test --json` shape: the top-level object is keyed by `"<file>:<contract>"`, each entry has `test_results`, and a failed invariant's `counterexample` is an object whose `Sequence` is a two-element array. `Sequence[0]` is the sequence length before shrinking, and `Sequence[1]` is the list of shrunk handler calls. A passing campaign has `counterexample: null`. `parseCounterexample(json, opts?)` iterates the sorted top-level keys and each entry's `test_results` rather than assuming a fixed file or contract key, keeps `Sequence[0]` as `originalLength`, and treats `null` as "no counterexample" (`{ kind: "none" }`; the pair is reported `unshrunk` with `unshrunkReason: "witness-not-failed"`). The Runner passes `opts = { contract: "Witness<k>", test: "invariant_witness" }` (discovery uses `testStatus` with `SeanceDiscovery` and `invariant_discovery`), so exactly one result is selected. With no `opts.test`, the selection takes every test whose name starts with `invariant`. Zero matches, or more than one, is `SEANCE_FAILED` naming the keys or the matching `<file>:<contract>:<test>` paths.
 
 15. **A project directory is never reused between séances.** Forge saves failing invariant sequences under `cache/invariant` and replays a saved failure on the next run instead of running a fresh campaign. A reused directory would therefore return a stale counterexample. Every séance generates its Foundry_Project in a fresh temporary directory. The discovery, witness, and replay phases share that directory only within the one séance. The directory is removed on success and kept on failure for debugging (see Error Handling), and is never reused by a later run, including a rerun of a failed séance. The Worker (a later spec) must follow the same rule.
 
@@ -49,11 +49,11 @@ Key design decisions:
 
 17. **Witness contracts are generated after discovery, from the selected pairs.** The (function, Classification) pairs are known only after the Report_Builder has selected them from the discovery records, so `test/Witness.t.sol` cannot be final when the project is first written. `generateProject` and `generateTestProject` take an optional `witnessPairs` list (default empty; `Witness.t.sol` then holds only its pragma and imports and no contract). After discovery, the Runner calls `regenerateWitness(project, abi, pairs)`, which returns the project with only `test/Witness.t.sol` replaced, writes that one file, and runs the witness campaigns. No other file changes, so forge recompiles only the rewritten test file. Both functions are pure.
 
-18. **The ABI comes from forge, so project generation has two stages.** `SeanceInput` carries no ABI. The Runner obtains it in three steps (see Runner): (a) write `src/`, `foundry.toml`, and `remappings.txt` (`generateSrcProject`) and run `forge build`; (b) read the legacy ABI from `out/Legacy<Name>.sol/<Name>.json`, run the on-chain bytecode check from the same build, and check that the port's ABI (`out/Port<Name>.sol/<Name>.json`) matches the legacy ABI; (c) write `test/` (`generateTestProject`, which needs the ABI and the TargetPlan) and run `forge test`, which reuses the cached `src/` build. `generateProject` remains as the composition of the two stages, used by tests.
+18. **The ABI comes from forge, so project generation has two stages.** `SeanceInput` carries no ABI. The Runner obtains it in three steps (see Runner): (a) write `src/`, `foundry.toml`, and `remappings.txt` (`generateSrcProject`) and run `forge build`; (b) read the legacy ABI from `out/Legacy<Name>.sol/<Name>.json`, run the on-chain bytecode check from the same build, and check that the port's ABI (`out/Port<Name>.sol/<Name>.json`) matches the legacy ABI; (c) write `test/` (`generateTestProject`, which needs the ABI and the TargetPlan) and run `forge test`, which reuses the cached `src/` build. `generateProject` remains as the composition of the two stages, used by tests. The ABI helpers live in two modules: `abi.ts` holds `loadAbi(raw)` (normalises a solc ABI array, deriving `stateMutability` from the legacy `payable`/`constant` flags when absent), and `abi-compat.ts` holds `compareAbis` and `readPortArtifact`. The artifact and bytecode helpers are in `bytecode.ts` (see Runner).
 
     The ABI match compares **function entries only**: each entry's key is its name plus the ordered list of canonical input types (tuples expanded, for example `(uint256,address)[]`), and the two sides are compared as multisets of keys, so overloads are handled. `stateMutability` (and the legacy `constant` flag), output types, parameter names, events, errors, the constructor, and the presence of `fallback` or `receive` are ignored. Constructor input differences surface as a constructor outcome in setup (both deployments get identical `ctorArgs`), and a fallback or receive difference surfaces as a classified divergence, so neither needs a pre-check. A mismatch is an `INVALID_INPUT` error naming the signatures present on only one side.
 
-19. **Handlers that would overflow the stack are skipped, not compiled with `via_ir`.** A handler with many compound parameters can fail to compile with "Stack too deep". `via_ir` is not used, because it slows every build and build time is inside the 300 s deadline. The generator instead calls `estimateHandlerStack(fn)` for each `nonpayable` or `payable` ABI function and skips any function whose estimate exceeds the named constant `MAX_HANDLER_STACK`. For a skipped function no handler is generated, every Arithmetic_Site in it is `unreachable`, and the Séance_Report lists it in `skippedFunctions` with `reason: "stack"`. The value of `MAX_HANDLER_STACK`, and the weights `estimateHandlerStack` gives to each parameter kind, are set from a compile experiment (a task finds the largest handler signature that builds without `via_ir`). This design fixes no number. Skipping replaces any earlier idea of failing the run on such a function.
+19. **Handlers that would overflow the stack are skipped, not compiled with `via_ir`.** A handler with many compound parameters can fail to compile with "Stack too deep". `via_ir` is not used, because it slows every build and build time is inside the 300 s deadline. The generator instead calls `estimateHandlerStack(fn)` for each `nonpayable` or `payable` ABI function and skips any function whose estimate exceeds the named constant `MAX_HANDLER_STACK`. For a skipped function no handler is generated, every Arithmetic_Site in it is `unreachable`, and the Séance_Report lists it in `skippedFunctions` with `reason: "stack"`. The constants come from a compile experiment on native forge 1.5.1 (task 8.5, `engine/test/docker/findings/8.5.stack-limit.native.md`): `MAX_HANDLER_STACK = 16`, and `estimateHandlerStack(fn) = 7 + (payable ? 1 : 0) + sum(cost)`, where `cost` is 1 for a scalar (`uintN`, `intN`, `bool`, `bytesN`) or `address`, 2 for `bytes` or `string`, and 3 for `address[]` or any other dynamic array. These are the exported `STACK_COST` weights (`fixed: 7`, `payable: 1`, `scalar: 1`, `address: 1`, `array: 3`, `bytes: 2`). The homogeneous maxima that build are 9 scalars, 4 `bytes`/`string` parameters, and 3 dynamic arrays, and the estimate was exact on about 1,300 compiled signatures. Only `uint256`, `uint16`, `address`, `bool`, `bytes32`, `bytes`, `string`, `address[]`, and `uint16[]` were compiled, and the other integer and fixed-bytes widths map to the same handler slot, so they take the scalar cost. `GeneratorOptions.maxHandlerStack` overrides the threshold for calibration and tests only. Skipping replaces any earlier idea of failing the run on such a function.
 
 Research notes (Foundry behaviour this design relies on, from Foundry docs): `compilation_restrictions` in `foundry.toml` pins a file path to a solc version, `vm.deployCode("File.sol:Contract", args)` deploys an artifact by name, `vm.recordLogs`/`vm.getRecordedLogs` capture logs per call, `vm.writeLine` requires `fs_permissions`, `targetContract`/`excludeContract`/`targetSelector` restrict invariant targets, invariant failures are shrunk by default bounded by `shrink_run_limit`, and `forge test --json` reports a `counterexample` call list for a failed invariant. These are the assumptions the Docker integration tests verify (see Known risks).
 
@@ -62,9 +62,11 @@ Research notes (Foundry behaviour this design relies on, from Foundry docs): `co
 ```mermaid
 flowchart TD
     CLI[Entry_Point CLI / library] --> V[Input validation]
-    V --> SG[generateSrcProject: src/, foundry.toml, remappings.txt]
+    SG[generateSrcProject: src/, foundry.toml, remappings.txt]
     SG --> FP[(Foundry_Project on disk, fresh temp dir)]
     FP --> BC[forge build, src only]
+    SC[checkSolcPresent, before any directory exists] --> SG
+    V --> SC
     BC --> ABI[Read legacy ABI, bytecode check, port ABI match]
     ABI --> AC[Autopsy contract: schema + ABI check]
     AC --> IG[Input_Generator]
@@ -83,8 +85,8 @@ flowchart TD
     RB --> OUT[(graveyard/name/seance-report.json)]
     DL{{One overall deadline}} -.->|TIMEOUT phase build, no report, no counts| BC
     DL -.->|TIMEOUT phase discovery, no report, partial counts| D1
-    DL -.->|pairs left unshrunk, reason deadline| W
-    DL -.->|pairs left unshrunk, reason deadline| RP
+    DL -.->|pairs not yet witnessed stay unshrunk, reason deadline; a passed witness keeps witness-not-failed| W
+    DL -.->|pairs not yet replayed stay unshrunk, reason deadline| RP
 ```
 
 ```mermaid
@@ -121,22 +123,27 @@ Repository placement:
 
 ```
 engine/src/seance/
-  entry.ts            # Entry_Point (CLI + library)
-  inputs.ts           # entry input validation
+  entry.ts            # Entry_Point CLI (not shipped yet; runSeance in runner.ts is the library entry)
+  types.ts            # shared types, error codes, Result helpers (ok, err, seanceError)
+  inputs.ts           # validateInput
   autopsy-contract.ts # schema validation, ABI cross-check
   input-generator.ts  # Targeted_Values
-  project-generator.ts  # generateSrcProject, generateTestProject, generateProject, regenerateWitness, estimateHandlerStack
-  abi.ts              # AbiFunction, readForgeAbi, compareAbis
+  project-generator.ts  # generateSrcProject, generateTestProject, generateProject, regenerateWitness, regenerateReplay, writeProjectFiles, estimateHandlerStack
+  foundry-config.ts   # foundry.toml rendering
+  abi.ts              # loadAbi
+  abi-compat.ts       # compareAbis, readPortArtifact
+  bytecode.ts         # stripMetadataSuffix, hashRuntimeCode, compareRuntimeCode, checkSolcPresent, listInstalledSolc, readLegacyArtifact
   templates/          # Handler.sol, Classifier.sol, Seance.t.sol, Witness.t.sol, Replay.t.sol
   classify.ts
   taint.ts            # afterDivergence computation and cross-check
   report.ts           # build, select findings, validate, canonical serialize
-  runner.ts           # forge process control, shared deadline
+  runner.ts           # runSeance, shared deadline, buildForgeArgs
+  process-runner.ts   # ProcessRunner interface, createProcessRunner
   forge-std-pin.ts    # FORGE_STD_PIN, DEFAULT_FORGE_STD_DIR, PORT_SOLC_VERSION, INVARIANT_RUNS, INVARIANT_DEPTH
   foundry-json.ts     # parser for `forge test --json` counterexamples
   schemas/            # engine/src/seance/schemas/autopsy-v1.schema.json, engine/src/seance/schemas/seance-report.schema.json
 engine/test/seance/   # vitest + fast-check, forge tests for templates
-graveyard/<name>/     # source, metadata, on-chain runtime code, seance-report.json
+graveyard/<name>/     # source, metadata, ABI, on-chain runtime code, seance-report.json (graveyard/bec/: BecToken.sol, metadata.json, abi.json, runtime.hex, SOURCE.md)
 ```
 
 ## Components and Interfaces
@@ -162,16 +169,38 @@ export type SeanceError = { code: string; message: string; details?: unknown;
   phase?: "build" | "discovery";   // set on TIMEOUT only; TIMEOUT is raised only for these two phases
   partialCounts?: ClassificationCounts };  // TIMEOUT with phase "discovery" and HANDLER_FAULT only; never with phase "build"
 
-export function runSeance(input: unknown, opts?: RunOptions): Promise<SeanceReport>; // rejects with SeanceError
+// runner.ts. Failures are returned, not thrown.
+export function runSeance(input: unknown, deps: RunnerDeps): Promise<Result<SeanceRunResult, SeanceError>>;
+export interface SeanceRunResult { report: SeanceReport; reportPath?: string; tempDir?: string }
+export interface RunnerDeps {
+  runner: ProcessRunner;           // createProcessRunner() in production, a script in tests
+  now: () => number;               // the only clock; the shared deadline is computed from it
+  tmpRoot: string;                 // parent of the fresh per-séance project directories; must exist
+  solcInstalled?: string[] | (() => string[] | Promise<string[]>);  // default: scan the svm directories
+  forgeStdDir?: string;            // default "/opt/forge-std"
+  graveyardRoot?: string;          // when set, the report is written to <graveyardRoot>/<graveyardName>/seance-report.json
+  graveyardName?: string;          // default: the contract name
+  keepTempOnFailure?: boolean;     // default true
+  keepTempOnSuccess?: boolean;     // default false
+  forgeBin?: string;               // default "forge"
+  generatorOptions?: Omit<GeneratorOptions, "forgeStdDir" | "witnessPairs">;
+}
 ```
 
-The CLI wraps `runSeance`, prints the report or the structured error as JSON, and exits 0 on success and non-zero on any error. The Worker later calls `runSeance` unchanged.
+The Entry_Point CLI (`entry.ts`) is not shipped yet. It will wrap `runSeance`, print the report or the structured error as JSON, and exit 0 on success and non-zero on any error. The Worker later calls `runSeance` unchanged. On failure the Runner adds `tempDir` to the error's `details` when the project directory was kept.
 
 Error codes: `MISSING_INPUT`, `INVALID_INPUT`, `AUTOPSY_REJECTED`, `SOLC_MISSING`, `BUILD_FAILED`, `BYTECODE_MISMATCH`, `TIMEOUT`, `HANDLER_FAULT`, `REPORT_WRITE_FAILED`, `ACCEPTANCE_FAILED`, `SEANCE_FAILED`.
 
 ### Input validation (`inputs.ts`)
 
-`validateInput(raw): Result<SeanceInput, SeanceError>` collects every missing field (`MISSING_INPUT`) or every invalid field (`INVALID_INPUT`) in a single error. It also enforces the solc version rule (`/^0\.\d+\.\d+$/` and minor below 8) and the optimizer runs range. The Project_Generator reuses it so it never writes files for invalid inputs.
+`validateInput(raw): Result<SeanceInput, SeanceError>` is pure and returns a fresh, normalised input. Its rules:
+
+- **Order.** Every missing field is reported together in one `MISSING_INPUT` error, with `details: { fields }`. Only when nothing is missing does it report every invalid field together in one `INVALID_INPUT` error, with `details: { fields, reasons }` (`reasons` maps each field name to its reason). `MISSING_INPUT` therefore wins when both kinds exist. Fields are listed in the order of `SeanceInput`. A `raw` that is not an object is `INVALID_INPUT` with the field `input`.
+- **Required fields.** `contractName`, `legacySource`, `portSource`, `autopsyReport`, `legacySolcVersion`, `legacyOptimizer`, `onChainRuntimeCode`, and `legacyOptimizerRuns` when `legacyOptimizer` is true. `null` counts as missing.
+- **Field rules.** `contractName` is a Solidity identifier (`[A-Za-z_][A-Za-z0-9_]*`) of 1 to 128 characters, because it appears in file names and `foundry.toml`. Sources are non-empty and at most 1 MiB of UTF-8. `legacySolcVersion` matches `0.x.y` with minor 0 to 7. `legacyOptimizerRuns` is an integer from 0 to 4,294,967,295. `onChainRuntimeCode` is `0x` hex of even length and not just `0x`. `constructorArgs` is `0x` hex of even length. `fuzzSeed` is a decimal integer or a `0x` hex string, at most 2^256 - 1. `timeoutSeconds` is a positive integer. The autopsy text is only checked to be a string here, because emptiness, JSON syntax, and the 10 MB cap belong to `AUTOPSY_REJECTED`.
+- **Normalisation.** `legacyOptimizerRuns` is dropped when `legacyOptimizer` is false (a supplied value is neither checked nor kept). `constructorArgs` defaults to `0x`, and `timeoutSeconds` defaults to 300.
+
+The Project_Generator reuses `validateInput` so it never writes files for invalid inputs.
 
 ### Autopsy contract (`autopsy-contract.ts`)
 
@@ -259,32 +288,43 @@ Seed sequences come from the Autopsy site's precondition hints (constructor-set 
 export interface GeneratorOptions {
   forgeStdDir?: string;               // <FORGE_STD_DIR>, absolute path, default "/opt/forge-std"; no trailing slash
   portSharesLegacyOptimizer?: boolean; // default false; adds min_optimizer_runs = R and max_optimizer_runs = R to the port restriction
-  fundingWei?: bigint;                // default 0n; the source of FUNDING_WEI in Targets.sol (SeanceInput has no funding field)
+  fundingWei?: bigint | number | string; // default 0; the source of FUNDING_WEI in Targets.sol (SeanceInput has no funding field)
+  witnessPairs?: WitnessPair[];       // default none; written into Witness.t.sol, k = index + 1, at most 10
+  maxHandlerStack?: number;           // calibration and test override of MAX_HANDLER_STACK; regenerateWitness and regenerateReplay ignore it
 }
-export interface WitnessPair { function: string; classification: "exorcised" | "port-bug" }  // at most 10; Witness<k> uses the 1-based position k
+export interface WitnessPair { function: string; classification: "exorcised" | "port-bug" }
+export interface ShrunkSequence { k: number; calls: { func_name: string; calldata: string; sender?: string }[] }  // k in 1..10 selects SeanceReplay<k>
+export interface GeneratedProject { files: ProjectFiles; skippedFunctions: SkippedFunction[] }
 
+// Every generator function returns Result<..., SeanceError> and never throws.
 // Stage 1: needs only the input. Writes src/, foundry.toml, remappings.txt. Independent of the ABI and the plan.
-export function generateSrcProject(input: SeanceInput, opts?: GeneratorOptions): ProjectFiles;
-// Stage 2: needs the ABI (read from forge) and the plan. Writes every file under test/.
+export function generateSrcProject(input: SeanceInput, opts?: GeneratorOptions): Result<ProjectFiles>;
+// Stage 2: needs the ABI (read from forge) and the plan. Writes every file under test/. Witness pairs come from opts.witnessPairs.
 export function generateTestProject(input: SeanceInput, plan: TargetPlan, abi: AbiFunction[],
-  opts?: GeneratorOptions, witnessPairs?: WitnessPair[]): ProjectFiles;
-// Composition of the two stages, used by tests: union of both file lists, sorted by path.
+  opts?: GeneratorOptions): Result<GeneratedProject>;
+// Composition of the two stages: union of both file lists, sorted by path; skippedFunctions comes from stage 2.
 export function generateProject(input: SeanceInput, plan: TargetPlan, abi: AbiFunction[],
-  opts?: GeneratorOptions, witnessPairs?: WitnessPair[]): ProjectFiles;
-// Returns `project` with only test/Witness.t.sol replaced by the contracts for `pairs`.
-export function regenerateWitness(project: ProjectFiles, abi: AbiFunction[], pairs: WitnessPair[]): ProjectFiles;
+  opts?: GeneratorOptions): Result<GeneratedProject>;
+// Return `project` with only one file replaced.
+export function regenerateWitness(project: ProjectFiles, abi: AbiFunction[], pairs: WitnessPair[]): Result<ProjectFiles>;   // test/Witness.t.sol
+export function regenerateReplay(project: ProjectFiles, abi: AbiFunction[], sequences: ShrunkSequence[]): Result<ProjectFiles>; // test/Replay.t.sol
 
 // Stack-depth skip rule (decision 19).
-export const MAX_HANDLER_STACK: number;                       // set from the compile experiment; this design fixes no value
-export function estimateHandlerStack(fn: AbiFunction): number; // pure; counts the handler's parameter and local slots from the table below
-export function computeSkippedFunctions(abi: AbiFunction[]): SkippedFunction[]; // functions with estimate > MAX_HANDLER_STACK, sorted by name, no duplicates
+export const MAX_HANDLER_STACK = 16;
+export const STACK_COST: { fixed: 7; payable: 1; scalar: 1; address: 1; array: 3; bytes: 2 };
+export function estimateHandlerStack(fn: AbiFunction): number; // 7 + (payable ? 1 : 0) + sum of the parameter costs; pure and monotone
+export function computeSkippedFunctions(abi: AbiFunction[], max?: number): SkippedFunction[]; // estimate > max (default MAX_HANDLER_STACK), sorted by name, no duplicates
 export interface SkippedFunction { name: string; reason: "stack" }
 
-// ProjectFiles = Array<{ path: string; contents: string }> sorted by path, LF newlines, no timestamps
-export function writeProject(dir: string, files: ProjectFiles): Promise<void>; // atomic per call: validate first, then write
+// ProjectFiles = Array<{ path: string; contents: string }> sorted by path, unique, LF newlines, no timestamps, no lib/
+export function validateProjectFiles(project: ProjectFiles): Result<void>;   // relative paths, no "." or ".." segments
+export function writeProjectFiles(dir: string, files: ProjectFiles, opts: { mode: "fresh" | "add" }): Result<void>;
+export function writeProject(dir: string, files: ProjectFiles): Result<void>;  // writeProjectFiles with mode "fresh"
 ```
 
-The Runner writes the stage 1 files, builds, and only then generates and writes the stage 2 files (see Runner). `generateTestProject` and `regenerateWitness` compute the skipped set with `computeSkippedFunctions(abi)`, the same function the Runner passes to the Input_Generator, so all three agree. `regenerateWitness` throws a programming error for more than 10 pairs; the Runner never passes more, because `selectFindingPairs` caps the list.
+`writeProjectFiles` validates the list first and writes nothing when it is invalid. In `fresh` mode, `dir` must not exist or must be empty, the files go to a sibling staging directory, and a rename puts them in place, so a failure leaves no partial project. In `add` mode, `dir` must already exist, the call refuses (and writes nothing) if any target file already exists, paths that resolve outside `dir` through a symlink are rejected, and files and directories created by a failed call are removed again. The Runner uses `fresh` for stage 1 and `add` for stage 2. Because `add` never overwrites, the Runner removes `test/Witness.t.sol` or `test/Replay.t.sol` before writing its regenerated version.
+
+The Runner writes the stage 1 files, builds, and only then generates and writes the stage 2 files (see Runner). `generateTestProject` and the Runner compute the skipped set with `computeSkippedFunctions(abi)`, so the generator, the Input_Generator, and the report agree. `regenerateWitness` returns an error for more than 10 pairs; the Runner never passes more, because the witness cap limits the selected list.
 
 The generator functions are pure, with no clocks, randomness, or environment reads, so identical inputs give byte-identical files (Requirement 1.13). Output layout (`<Name>` is the contract name; the contract identifiers inside the files are unchanged):
 
@@ -321,14 +361,14 @@ test/Replay.t.sol                # contracts SeanceReplay1..SeanceReplay10, one 
 
 **Targets.sol constants.** `FUNDING_WEI` is `GeneratorOptions.fundingWei` (default 0). `HAS_TOKEN_SHARES` is true if and only if the ABI has both `transfer(address,uint256)` and `balanceOf(address)`.
 
-**Stack-depth skip.** For every `nonpayable` or `payable` ABI function, `estimateHandlerStack(fn)` estimates the stack slots the handler function needs from its mapped parameters (the table under Input_Generator: a scalar maps to one slot, `address` to one, `address[]` and other dynamic arrays to two, `bytes` and `string` to one, plus the fixed `pick`, `actorIdx`, `weiValue`, and locals). A function whose estimate is greater than `MAX_HANDLER_STACK` is skipped:
+**Stack-depth skip.** For every `nonpayable` or `payable` ABI function, `estimateHandlerStack(fn)` estimates the stack slots the handler function needs from its mapped parameters (the table under Input_Generator and the weights in decision 19: a scalar or `address` costs 1, `bytes` and `string` cost 2, `address[]` and other dynamic arrays cost 3, plus a fixed 7 for the return label, `pick`, `actorIdx`, locals and encoder temporaries, and 1 more for `weiValue` on a payable function). A function whose estimate is greater than `MAX_HANDLER_STACK` (16) is skipped:
 
 - no handler function is generated for it, and it is absent from `handlerSelectors()`;
 - seed calls that name it are dropped from the seed sequences, and a site whose seed becomes unresolvable is `unreachable` by the existing rule;
 - every Arithmetic_Site whose `function` is the skipped function is `unreachable` (the Input_Generator receives the skipped set);
 - its name appears once in `SeanceReport.skippedFunctions` (overloads share a name, so any skipped overload lists the name once).
 
-The rule skips and never fails. If the estimate under-counts and `forge test` still reports "Stack too deep", the run ends in `BUILD_FAILED` with the compiler output, so `MAX_HANDLER_STACK` should be set conservatively below the largest signature that built in the experiment. `fallback` handlers take no mapped parameters and are never skipped.
+The rule skips and never fails. If the estimate under-counts and `forge test` still reports "Stack too deep", the run ends in `BUILD_FAILED` with the compiler output, so the threshold sits at the largest signature that built in the experiment, and `GeneratorOptions.maxHandlerStack` exists to recalibrate it. `fallback` handlers take no mapped parameters and are never skipped.
 
 ### Discovery invariant test (generated `Seance.t.sol`)
 
@@ -363,7 +403,7 @@ contract SeanceDiscovery is Test {
 3. **Token shares.** When `Targets.HAS_TOKEN_SHARES` is true (the ABI has both `transfer(address,uint256)` and `balanceOf(address)`; skipping a function for stack depth does not change it), read the deployer's balance on the legacy deployment, set `share = balance / ACTORS.length`, and for each actor other than the deployer send `transfer(actor, share)` from the deployer through the normal differential path (same calldata and sender to both deployments, compared and classified). When the ABI lacks either function, this step is skipped.
 4. Run the Input_Generator's seed sequences through the same differential path.
 
-**Setup records are counted.** Every setup call (constructor, token share transfer, seed call) writes a record with `idx = -1`, is classified, and is included in `counts` and `totalCalls`. This happens once per forge process, not once per sequence (Foundry reverts to the post-`setUp` state), so it adds `ACTORS.length - 1` plus the seed calls (at most a few dozen) to the totals. Setup records are excluded from the budget ordinal: the "within 2,000 fuzz calls" measure for BEC counts only records with `idx >= 0`, so setup never consumes the call budget. Handler calls made while `stopped` produce no record and do not consume the budget either. A `port-bug` or `exorcised` setup record sets `stopped` in `setUp`, which Foundry preserves in the snapshot, so the séance ends with zero fuzz calls, consistent with Requirements 2.6 and 5.1. A setup `port-bug` taints the remaining setup records in the same way as a fuzz sequence. Because `diverged` is handler storage written during `setUp`, it is part of the snapshot that every fuzz sequence starts from, so after a setup `port-bug` every fuzz record carries `afterDivergence = true`. Findings whose first untainted record is a setup record skip phases 2 and 3 and are reported as-is with `unshrunkReason: "setup"` (decision 10). Their `precedingCalls` are the earlier setup calls in order.
+**Setup records are counted.** Every setup call (constructor, token share transfer, seed call) writes a record with `idx = -1`, is classified, and is included in `counts` and `totalCalls`. This happens once per forge process, not once per sequence (Foundry reverts to the post-`setUp` state), so it adds `ACTORS.length - 1` plus the seed calls (at most a few dozen) to the totals. Setup records are excluded from the budget ordinal: the "within 2,000 fuzz calls" measure for BEC counts only records with `idx >= 0`, so setup never consumes the call budget. Handler calls made while `stopped` produce no record and do not consume the budget either. A `port-bug` or `exorcised` setup record sets `stopped` in `setUp`, which Foundry preserves in the snapshot, so the séance ends with zero fuzz calls, consistent with Requirements 2.6 and 5.1. A setup `port-bug` taints the remaining setup records in the same way as a fuzz sequence. Because `diverged` is handler storage written during `setUp`, it is part of the snapshot that every fuzz sequence starts from, so after a setup `port-bug` every fuzz record carries `afterDivergence = true`. Findings whose first untainted record is a setup record skip phases 2 and 3 and are reported as-is with `unshrunkReason: "setup"` (decision 10). Their `precedingCalls` list is empty, because every generated contract re-runs the same setup in `setUp`, so setup calls are never preceding calls of any finding.
 
 **Output path.** `setOutputPath(path)` must be called before `init`. `vm.writeFile` and `vm.writeLine` do not create directories, so when recording is on (`SEANCE_RECORD != 0`) it calls `vm.createDir("seance-out", true)` and then truncates the file with `vm.writeFile(path, "")`. It works only for paths under `seance-out/`, the one writable `fs_permissions` entry. With `SEANCE_RECORD=0` it creates nothing.
 
@@ -455,20 +495,51 @@ export function verifyTaint(records: OrderedRecord[]): Result<void, SeanceError>
 ### Report_Builder (`report.ts`)
 
 ```ts
-export function parseRecords(jsonl: string, runs: number): Result<OrderedRecord[], SeanceError>;
+export function parseRecords(jsonl: string, runs: number): Result<ParsedRecords, SeanceError>;
+// ParsedRecords = { records, setupRecords, sequences, exorcisedAtIndex, counts, totalCalls, setupCalls, taintedCalls, sequenceResults }
 // assigns ordinal from line order to the kept records only; strips and verifies the replay tail; error is SEANCE_FAILED
-export function buildReport(records: OrderedRecord[], meta: ReportMeta, shrunk: ShrinkOutcomes): SeanceReport;
-export function selectFindingPairs(records: OrderedRecord[], cap: number):
-  { setup: Pair[]; selected: Pair[]; overCap: Pair[] };
-export type PairProgress = { witnessDone: Set<string>; replayDone: Set<string>; deadlineReached: boolean };
-export function assignDispositions(sel: ReturnType<typeof selectFindingPairs>, progress: PairProgress): PairDisposition[];
-// PairDisposition = { pair, outcome: "shrunk" | "unshrunk", unshrunkReason?: UnshrunkReason }
-export type UnshrunkReason = "witness-not-failed" | "replay-mismatch" | "witness-cap" | "deadline" | "setup";
-export function validateReport(r: unknown): Result<SeanceReport, SchemaViolation[]>;
-export function serializeReport(r: SeanceReport): string;   // canonical key order, 2-space indent, trailing LF
-export function parseReport(text: string): SeanceReport;
-export function writeReportAtomic(path: string, text: string): Promise<void>; // temp file + rename
+
+export const WITNESS_CAP = 10;
+export interface Pair {
+  function: string; classification: "exorcised" | "port-bug";
+  first: OrderedRecord;            // first untainted record of the pair, by ordinal
+  setup: boolean;                  // first.idx === -1
+  preceding: OrderedRecord[];      // earlier records of first's own fuzz sequence; empty for a setup pair
+}
+export function pairKey(p: { function: string; classification: string }): string;   // "<function>|<classification>"
+export function selectFindingPairs(parsed: ParsedRecords): Pair[];
+// one flat list: setup pairs first, then exorcised, then port-bug, each group by first ordinal
+
+export interface ShrinkOutcome {
+  witness: "failed" | "not-failed"; originalLength?: number;   // Sequence[0], for a failed witness
+  replay?: { record?: RecordLine; preceding: RecordLine[] };   // record: last replay record with the pair's function and afterDivergence false
+}
+export interface PairProgress { witnessDone: Set<string>; replayDone: Set<string>; deadlineReached: boolean;
+  outcomes: Map<string, ShrinkOutcome> }                        // keyed by pairKey
+export type DispositionKind = "setup" | "over-cap" | "shrink" | "shrunk-confirmed" | "witness-not-failed" | "replay-mismatch" | "deadline";
+export interface PairDisposition { pair: Pair; disposition: DispositionKind;
+  outcome: "shrunk" | "unshrunk" | "pending"; unshrunkReason?: UnshrunkReason; shrink?: ShrinkOutcome }
+export function assignDispositions(pairs: Pair[], progress?: PairProgress):
+  { dispositions: PairDisposition[]; shrinking: SeanceReport["shrinking"] };
+export function chooseReported(d: PairDisposition): Finding;    // throws on a "shrink" (pending) disposition
+
+export interface BuildReportArgs {
+  contract: string; seed: string; runs?: number; depth?: number;   // runs and depth default to INVARIANT_RUNS and INVARIANT_DEPTH
+  parsed: ParsedRecords; dispositions: ReturnType<typeof assignDispositions>;
+  autopsy: AutopsyReport; abi: AbiFunction[]; plan: TargetPlan;
+  skippedFunctions: readonly { name: string; reason: "stack" }[];
+}
+export function attributeSite(fnName: string, calldata: string, autopsy: AutopsyReport, abi: AbiFunction[], plan: TargetPlan):
+  { id: string; location: SourceLocation } | "unattributed";
+export function buildReport(args: BuildReportArgs): SeanceReport;
+export function validateReport(r: unknown): Result<SeanceReport>;      // SEANCE_FAILED, violations in details
+export function serializeReport(r: SeanceReport): string;              // canonical key order, 2-space indent, trailing LF
+export function parseReport(text: string): Result<SeanceReport>;
+export const REPORT_FILE_NAME = "seance-report.json";
+export function writeReportAtomic(graveyardRoot: string, name: string, report: SeanceReport): Promise<Result<{ path: string }>>;
+// writes <graveyardRoot>/<name>/seance-report.json through a temp file in the same directory and a rename
 ```
+
 
 Behaviour:
 
@@ -483,48 +554,72 @@ Behaviour:
 - `ordinal` is assigned here, 1-based, from the line order of the kept lines of `records.jsonl` (after the tail is removed). Setup records (`idx == -1`) receive ordinals like any other line but are excluded from the budget ordinal (`fuzzOrdinal`, counting only `idx >= 0`).
 - Groups records by sequence (an `idx == 0` record starts a sequence; `idx == -1` records form the setup sequence) and ignores any record after an `exorcised` record in the same sequence (Requirement 5.3), recording `exorcisedAtIndex`.
 - Counts every Classification, tainted or not, with zero for absent ones.
-- **Findings come only from records with `afterDivergence = false`.** `selectFindingPairs` takes the first untainted record by ordinal for each (function, Classification) pair with Classification `exorcised` or `port-bug`, so a pair seen only after a divergence gives no finding (Requirement 8.4). Setup records have the lowest ordinals, so a pair whose first untainted record is a setup record (`idx = -1`) goes to `setup`: it is reported as-is with `unshrunkReason: "setup"`, skips phases 2 and 3, and does not count toward the cap. The remaining pairs are ordered `exorcised` first, then `port-bug`, each by first ordinal. The first `cap` of them (cap = 10) are `selected` for witness shrinking, and the rest are `overCap`. The cap therefore applies to fuzz pairs only, and setup findings never displace a fuzz pair.
-- **Dispositions.** `assignDispositions` gives each pair exactly one outcome. `setup` pairs are `unshrunk/setup`. `overCap` pairs are `unshrunk/witness-cap`. For selected pairs: a pair whose witness campaign or replay did not complete before the deadline is `unshrunk/deadline` (this includes every pair for which no campaign was launched because the budget was already 0); a pair whose campaign passed is `unshrunk/witness-not-failed`; a pair whose replay Classification differs is `unshrunk/replay-mismatch`; otherwise it is `shrunk`.
-- `chooseReported(original, shrunk, replayClass)` returns the shrunk sequence only if `replayClass` equals the original Classification, otherwise the original, flagged `unshrunk: true`.
-- Attributes an Arithmetic_Site to an Exorcism when the exorcised call's function has exactly one site whose Targeted_Value appears in the calldata at the site's `ParamSlot` (following the offset for `dynamicArrayLength`), else `siteAttribution: "unattributed"`.
-- Writes via temp file and rename so a write failure leaves any existing report unchanged (Requirement 7.2).
-- `skippedFunctions` is copied from `ReportMeta` (the Runner's `computeSkippedFunctions(abi)`), sorted by name with duplicates removed. The field is always present, and `seance-report.schema.json` requires it (the report-schema task owns the schema change).
+- **Findings come only from records with `afterDivergence = false`.** `selectFindingPairs` takes the first untainted record by ordinal for each (function, Classification) pair with Classification `exorcised` or `port-bug`, so a pair seen only after a divergence gives no finding (Requirement 8.4). Setup records have the lowest ordinals, so a pair whose first untainted record is a setup record (`idx = -1`) is a setup pair: it is reported as-is with `unshrunkReason: "setup"`, skips phases 2 and 3, and does not count toward the cap. `selectFindingPairs` returns one flat list, setup pairs first, then `exorcised` pairs, then `port-bug` pairs, each group by first ordinal. `assignDispositions` applies the cap in that order: the first `WITNESS_CAP` (10) fuzz pairs are selected for witness shrinking, and the rest are `over-cap`. The cap therefore applies to fuzz pairs only, and setup findings never displace a fuzz pair.
+- **Dispositions.** `assignDispositions(pairs, progress?)` gives each pair exactly one disposition and returns the `shrinking` counts with it. The disposition kinds are `setup`, `over-cap`, `shrink`, `shrunk-confirmed`, `witness-not-failed`, `replay-mismatch`, and `deadline`. `setup` pairs are `unshrunk/setup`, and `over-cap` pairs are `unshrunk/witness-cap`. For selected pairs, in this order: a pair whose witness completed and did not fail is `unshrunk/witness-not-failed`, whatever the deadline did later; a pair whose witness failed and whose replay completed is `shrunk-confirmed` when the replay record's Classification equals the pair's, and `unshrunk/replay-mismatch` otherwise (a replay with no matching record is a mismatch); any other selected pair is `unshrunk/deadline` when `deadlineReached` is true. A selected pair that is unfinished with no deadline is `shrink`, with `outcome: "pending"`. This is the state before phases 2 and 3 run, which is how the Runner learns which pairs to shrink. Pending pairs are not counted in `shrinking`, so `pairsFound` equals the number of pairs only when nothing is pending, and `buildReport` requires that no disposition is pending.
+- `chooseReported(disposition)` returns the `Finding`. For `shrunk-confirmed` it is built from the replay record and the replay's preceding records, with `originalLength` (the witness `Sequence[0]`). For every other disposition it is the original sequence from the discovery records, with `unshrunk: true`, the reason, and the original Classification. A port-bug finding also carries both Call_Records and `differingFields` from the reported record. `site` is not set here.
+- **Site attribution.** `buildReport` sets `site` on every Exorcism through `attributeSite`. It picks the first site, in Autopsy_Report order, among the sites of the finding's function whose arithmetic actually overflows on the finding's calldata. It decodes each operand from the calldata: a `known` operand is its value, a `param` operand is the head word at its `static` slot (masked to the operand's width), and an `arrayLength` operand is the length word reached through the head offset of its `dynamicArrayLength` slot. It then evaluates the operator with unchecked `2^N` semantics, where `N` is the width of the narrowest operand type (`+` overflows when `a + b >= 2^N`, `-` when `a < b`, `*` when `a * b >= 2^N`, `**` when `a^b >= 2^N`). A site is skipped when an operand is `unknown` or signed, has no slot in the TargetPlan, or cannot be decoded from the calldata. When no site overflows, `site` is `"unattributed"`. This replaces the earlier rule that required exactly one site whose Targeted_Value appears in the calldata, which could not tell apart two sites that share a value and could attribute a site that does not overflow.
+- `writeReportAtomic(graveyardRoot, name, report)` writes `<graveyardRoot>/<name>/seance-report.json` through a temp file in the same directory and a rename, so a write failure leaves any existing report unchanged and removes the temp file (Requirement 7.2). `name` must match `^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$` (no dots and no separators, so no path escape), or the call returns `INVALID_INPUT`. The report is validated first and nothing is written for an invalid report. An I/O failure is `REPORT_WRITE_FAILED`.
+- `validateReport` checks the JSON Schema first (every violation listed, sorted) and then the rules the schema cannot express: the four counts sum to `totalCalls`, `taintedCalls` and `setupCalls` do not exceed `totalCalls`, `pairsFound` equals `pairsSetup + pairsShrunk + pairsUnshrunk + pairsOverCap`, `skippedFunctions` is sorted by name without duplicates, there is at most one finding per (function, Classification) pair and each list holds only its own Classification, and every Exorcism has a `site`. Any violation is `SEANCE_FAILED` with the list in `details.violations`. `parseReport` is `JSON.parse` followed by `validateReport`.
+- `skippedFunctions` is passed in `BuildReportArgs` (the generator's `skippedFunctions` result, which the Runner takes from `generateTestProject`), sorted by name with duplicates removed. The field is always present, and `seance-report.schema.json` requires it. A site in a skipped function is added to `unreachableSites` even if the plan did not flag it.
 
 ### Runner (`runner.ts`) and shared deadline
 
 ```ts
 export interface Deadline { readonly at: number }                     // absolute ms timestamp
 export function makeDeadline(startMs: number, timeoutSeconds: number): Deadline;
-export function phaseBudgetMs(d: Deadline, nowMs: number): number;   // max(0, d.at - nowMs)
-export function buildForgeArgs(phase: Phase, opts: ForgeOpts): string[];
+export function remainingMs(d: Deadline, nowMs: number): number;     // max(0, d.at - nowMs)
+export function phaseBudgetMs(d: Deadline, nowMs: number): number;   // same as remainingMs; the process timeout for the next run
+export function isExpired(d: Deadline, nowMs: number): boolean;      // phaseBudgetMs(d, nowMs) === 0
+export type Phase = { kind: "build" } | { kind: "discovery" } | { kind: "witness"; k: number } | { kind: "replay"; k: number };
+export interface ForgeOpts { fuzzSeed?: string }
+export interface ForgeInvocation { args: string[]; env: Record<string, string> }
+export function buildForgeArgs(phase: Phase, opts?: ForgeOpts): Result<ForgeInvocation>;   // INVALID_INPUT when k is not an integer in 1..10
 ```
 
-**Run orchestration.** After `validateInput`, the Runner works in this order, always in a fresh temporary project directory:
+`process-runner.ts` defines the `ProcessRunner` interface the Runner spawns through:
 
-1. Create the directory and check that the legacy solc binary exists (`SOLC_MISSING`).
-2. Step (a): write `generateSrcProject` files (`src/legacy`, `src/port`, `foundry.toml`, `remappings.txt`) and run `forge build --offline`. The deadline rule for build applies (below).
-3. Step (b): read the legacy ABI from `out/Legacy<Name>.sol/<Name>.json` and the port ABI from `out/Port<Name>.sol/<Name>.json`. Run the bytecode check on the legacy runtime code from the same build (`BYTECODE_MISMATCH`). Compare the two ABIs with `compareAbis` (function entries only, decision 18); a mismatch is `INVALID_INPUT` naming the differing signatures. Then run `parseAutopsyReport(text, legacyAbi)` (`AUTOPSY_REJECTED`), compute `computeSkippedFunctions(abi)`, and run `generateTargets`.
-4. Step (c): write the `generateTestProject` files (`test/`, with no witness pairs) and run discovery with `forge test`, which reuses the cached `src/` build. Compiling the test files is inside the discovery budget.
-5. Select finding pairs, call `regenerateWitness`, write `test/Witness.t.sol`, and run the witness campaigns, then the replays (generating `Replay.t.sol` once the shrunk calldata is known).
-6. Build and write the report, and remove the directory.
+```ts
+export interface ProcessRunOptions { cwd: string; env: Record<string, string>; timeoutMs: number; signal?: AbortSignal }
+export interface ProcessResult { code: number | null; stdout: string; stderr: string; timedOut: boolean }
+export interface ProcessRunner { run(cmd: string, args: string[], opts: ProcessRunOptions): Promise<ProcessResult> }
+export const KILL_GRACE_MS = 5_000;
+export function createProcessRunner(config?: { killGraceMs?: number }): ProcessRunner;
+```
 
-The directory is removed on success and kept on failure, and is never reused (decision 15). Every error in steps 1 to 5 leaves the directory in place for diagnosis, including the ABI-mismatch and autopsy errors, which can occur after `src/` has been written. No `test/` file is written before step 4, so a rejected autopsy report or ABI never produces séance inputs.
+`createProcessRunner` spawns with no shell, in its own process group (`detached: true`), so forge's own children (solc, any helper process) die with it. On the process timeout, and on `signal` aborting, it sends `SIGTERM` to the group, then `SIGKILL` after `killGraceMs` (default `KILL_GRACE_MS`, 5,000 ms) if the group has not exited. `timedOut` is set only for the timeout case, not for an external abort.
+
+**Run orchestration.** After `validateInput`, the Runner works in this order:
+
+1. **Check that the legacy solc binary exists (`SOLC_MISSING`), before any temporary directory is created.** This is a deliberate departure from a strict reading of the design text ("create the directory, then check solc"): checking first means a missing compiler leaves nothing on disk to clean up, and the check needs no project directory to run. No budget is spent on it (it runs before the deadline's `startMs` is fixed by the first budget read).
+2. Create a fresh temporary project directory (never reused, decision 15).
+3. Step (a): write `generateSrcProject` files (`src/legacy`, `src/port`, `foundry.toml`, `remappings.txt`) and run `forge build --offline`. The deadline rule for build applies (below).
+4. Step (b): read the legacy ABI from `out/Legacy<Name>.sol/<Name>.json` and the port ABI from `out/Port<Name>.sol/<Name>.json`. Run the bytecode check on the legacy runtime code from the same build (`BYTECODE_MISMATCH`). Compare the two ABIs with `compareAbis` (function entries only, decision 18); a mismatch is `INVALID_INPUT` naming the differing signatures. Then run `parseAutopsyReport(text, legacyAbi)` (`AUTOPSY_REJECTED`), compute `computeSkippedFunctions(abi)`, and run `generateTargets`.
+5. Step (c): write the `generateTestProject` files (`test/`, with no witness pairs) and run discovery with `forge test`. If discovery exits non-zero without printing a parseable JSON result, the Runner treats it as a compilation failure (for example "Stack too deep" in a generated test file) and returns `BUILD_FAILED` with the compiler output, the same code as a failed `forge build`; this is how a test-file compile error surfaces, distinct from a `Failure` status inside valid JSON (which is `HANDLER_FAULT`, see below). Compiling the test files is inside the discovery budget.
+6. Select finding pairs with `selectFindingPairs` and `assignDispositions` (no `progress`, so every selected pair is `shrink`/pending), call `regenerateWitness` with the pending pairs, write `test/Witness.t.sol`, and run the witness campaigns one at a time in pair order. Then, for every pair whose witness failed, call `regenerateReplay` with the shrunk sequences, write `test/Replay.t.sol`, and run the replays one at a time. **Ordering consequence:** because witnesses run before replays, a deadline reached during witness shrinking leaves every pair that has not yet completed its witness campaign as `unshrunk/deadline`, while a pair whose witness had already completed (pass or fail) before the deadline keeps its `witness-not-failed` outcome or proceeds to replay once the replay phase starts; a deadline reached during replay leaves every not-yet-replayed pair `unshrunk/deadline` even though its witness failed.
+7. Re-run `assignDispositions` with the completed `PairProgress`, build and validate the report, write it when `graveyardRoot` is given, and remove the directory.
+
+The directory is removed on success and kept on failure (`keepTempOnFailure`, default true), and is never reused (decision 15). Every error leaves the directory in place for diagnosis, including the ABI-mismatch and autopsy errors, which can occur after `src/` has been written. No `test/` file is written before step 4, so a rejected autopsy report or ABI never produces séance inputs. On a kept failure, the Runner adds `tempDir` to the error's `details`.
 
 The Entry_Point creates one `Deadline` when it starts (timeout default 300 s). `forge build`, discovery, every witness campaign, and every replay run each receive `phaseBudgetMs(deadline, now())` as their individual process timeout, so the total never exceeds the configured timeout. Time spent in `forge build` is therefore not available to later phases. The deadline has three different effects.
 
 - **Build.** If the budget is 0 before `forge build` launches, or `forge build` exceeds its budget, the Runner sends SIGTERM and then SIGKILL so that `forge` stops within 5 seconds, and returns a `TIMEOUT` error carrying `phase: "build"`. The error has no `partialCounts`, because no séance records exist yet. No report is written, and the discovery phase is not started. The legacy solc check and the bytecode check are not subject to a separate budget. The bytecode check is a synchronous comparison that runs after a successful build, and if the deadline has passed by then, the Runner re-checks the budget before launching discovery and applies the discovery rule below.
 - **Discovery.** If the budget is 0 before discovery launches, or discovery exceeds its budget, the Runner sends SIGTERM and then SIGKILL so that `forge` stops within 5 seconds, counts the complete lines of `records.jsonl` (discarding a truncated last line), and returns a `TIMEOUT` error carrying `phase: "discovery"` and `partialCounts`. Partial counts include every complete record written by discovery, including tainted ones. No report is written. `TIMEOUT` is raised only for build and discovery.
-- **Witness and replay.** If the budget is 0 before a witness or replay run launches, the run is not launched. If a witness or replay run exceeds its budget, the Runner kills it the same way. In both cases the Runner stops launching further runs, sets `deadlineReached`, and returns the progress to the Report_Builder. Every selected pair that has not completed both its witness campaign and its replay is reported with its original sequence, `unshrunk: true` and `unshrunkReason: "deadline"`. Pairs that completed keep their shrunk findings. The report is written from the discovery records as usual, with `shrinking.deadlineReached = true`, and the run succeeds with exit status 0.
+- **Witness and replay.** If the budget is 0 before a witness or replay run launches, the run is not launched. If a witness or replay run exceeds its budget, the Runner kills it the same way. In both cases the Runner stops launching further runs and sets `deadlineReached`. Because witnesses run before replays (step 5), a pair whose witness campaign had already completed before the deadline keeps that outcome (`witness-not-failed`, or moves on to await its replay); every pair that has not completed is `unshrunk/deadline`. The report is written from the discovery records as usual, with `shrinking.deadlineReached = true`, and the run succeeds with exit status 0 (no `TIMEOUT` error for this case).
+
+**Partial counts.** `partialCountsFromJsonl(text, opts?)` computes the Classification counts used in `TIMEOUT` (`phase: "discovery"`) and `HANDLER_FAULT` errors. It is lenient: it splits on newlines, drops the final (possibly incomplete) segment, and for each remaining line parses it as JSON and counts it only when it has a numeric `idx` and a valid `classification`; a line that is not a record is skipped rather than failing the read. With `{ dropLastSequence: true }` (used for `HANDLER_FAULT`) it additionally drops every record from the last `idx == 0` line onward, discarding the in-progress sequence. No replay-tail stripping is applied, because an interrupted discovery has no replay tail.
 
 Replay records live in separate files (`seance-out/replay-<k>.jsonl`, one per `SeanceReplay<k>` contract) and never enter the counts.
 
-`buildForgeArgs` produces, for each phase:
+`buildForgeArgs` produces, for each phase (`--offline` is on every `build` and `test` invocation, so the generated project never attempts network access and never spends the deadline on a download):
 
 | Phase | Arguments |
 |---|---|
-| Discovery | `test --json --match-contract '^SeanceDiscovery$' --match-test invariant_discovery --fuzz-seed <seed>` with `SEANCE_RECORD=1` |
-| Witness k | `test --json --match-contract '^Witness<k>$' --match-test invariant_witness --fuzz-seed <seed>` with `SEANCE_RECORD=0` and `FOUNDRY_INVARIANT_SHRINK_RUN_LIMIT=5000` |
-| Replay k | `test --json --match-contract '^SeanceReplay<k>$' --fuzz-seed <seed>` with `SEANCE_RECORD=1`; the output path is set inside the contract's `setUp` |
+| Build | `build --offline` |
+| Discovery | `test --offline --json --match-contract '^SeanceDiscovery$' --match-test invariant_discovery [--fuzz-seed <seed>]` with `SEANCE_RECORD=1` |
+| Witness k | `test --offline --json --match-contract '^Witness<k>$' --match-test invariant_witness [--fuzz-seed <seed>]` with `SEANCE_RECORD=0` and `FOUNDRY_INVARIANT_SHRINK_RUN_LIMIT=5000` |
+| Replay k | `test --offline --json --match-contract '^SeanceReplay<k>$' [--fuzz-seed <seed>]` with `SEANCE_RECORD=1`; no `--match-test` (the contract has one `test_replay`), and the output path is set inside the contract's `setUp` |
+
+`--fuzz-seed` is omitted entirely when `fuzzSeed` is not given, rather than passed empty.
 
 The Runner passes the seed to forge unchanged and the Report_Builder copies it into `report.seed`, but forge 1.5.1 does not reproduce an invariant campaign from a seed (decision 16), so the seed is best effort. Nothing in the Runner or Report_Builder assumes that two runs with the same seed agree; the reproducible artifact is each finding's stored sequence.
 
@@ -536,18 +631,30 @@ The Runner also checks that the legacy solc binary exists before `forge build` (
 
 After discovery, the Runner calls `regenerateWitness(project, abi, pairs)` with the selected pairs (decision 17) and writes the resulting `test/Witness.t.sol`. For each selected (function, Classification) pair, that file holds `Witness<k>` (k is the 1-based position in the selected list), whose `setUp` is the same as discovery and additionally calls `handler.setWitness(string fn, Classifier.Class cls)`, where `fn` is the function name (the same string the handler writes as `function` in the record) and not a selector. The handler stores `keccak256(bytes(fn))` and sets `witnessHit = true` when it records a fuzz call (`idx >= 0`) with that function name and Classification and `afterDivergence == false`. `invariant_witness()` asserts `!handler.witnessHit()`. The witness campaign runs with `SEANCE_RECORD=0` and Foundry's default shrinking.
 
-The engine reads the result from `forge test --json` and never parses text output. `parseCounterexample` iterates the `"<file>:<contract>"` keys of the top-level object and each entry's `test_results`, and finds the `invariant_witness` result. For a failed campaign, `counterexample.Sequence[1]` is the shrunk list of handler calls (each with the handler `calldata` in hex and the sender), and `counterexample.Sequence[0]` is the sequence length before shrinking. `counterexample: null` means the campaign did not fail.
+The engine reads the result from `forge test --json` and never parses text output. `parseCounterexample(json, { contract: "Witness<k>", test: "invariant_witness" })` selects that one result and finds its counterexample. For a failed campaign, `counterexample.Sequence[1]` is the shrunk list of handler calls (each with the handler `calldata` in hex, the `sender`, and the other `HandlerCall` fields below), and `counterexample.Sequence[0]` is the sequence length before shrinking. `counterexample: null` means the campaign did not fail (`{ kind: "none" }`).
 
 ```ts
 // foundry-json.ts
-export interface HandlerCall { calldata: string; sender: string }
+export interface HandlerCall {
+  funcName: string;        // forge's func_name
+  signature: string;       // "" when absent
+  args: string[];          // forge's args: a bare string becomes a one-element array, "" becomes []
+  rawArgs: string;         // forge's raw_args, "" when absent
+  calldata: string;        // 0x hex, even length
+  sender: string;          // 0x + 40 hex
+  addr: string;            // handler address as forge gives it, "" when absent
+  contractName: string;    // "" when absent
+}
 export type CounterexampleResult =
-  | { found: true; originalLength: number; calls: HandlerCall[] }   // calls from Sequence[1], in order
-  | { found: false };                                               // counterexample: null
-export function parseCounterexample(json: unknown): Result<CounterexampleResult, SeanceError>;
+  | { kind: "none" }
+  | { kind: "found"; originalLength: number; calls: HandlerCall[] };   // calls from Sequence[1], in order
+export interface ParseOptions { contract?: string; test?: string }     // test matched with or without a trailing "()"
+export type TestStatus = "Success" | "Failure" | "Skipped";
+export function parseCounterexample(json: unknown, opts?: ParseOptions): Result<CounterexampleResult, SeanceError>;
+export function testStatus(json: unknown, opts?: ParseOptions): Result<TestStatus, SeanceError>;
 ```
 
-A shape that matches neither form (no `invariant_witness` result, or `Sequence` not a two-element array) returns `SEANCE_FAILED` naming the missing part. `originalLength` is carried into the finding (see Data Models).
+Both functions select one `test_results` entry the same way: iterate the top-level `"<file>:<contract>"` keys in sorted order, optionally restricted to `opts.contract` (matched against the full key or just the contract part after the last `:`), and within each matching entry's `test_results`, the tests whose bare name (with any trailing `()` stripped for the comparison) equals `opts.test`, or, with no `opts.test`, every test whose name starts with `invariant`. Zero matches or more than one match is `SEANCE_FAILED` naming the candidate keys (zero matches) or the matching `<file>:<contract>:<test>` paths (more than one). Once a result is selected, a shape that is not `{ status, counterexample }` with `counterexample` either `null` or `{ Sequence: [number, array] }` is `SEANCE_FAILED` naming the missing or malformed part. `originalLength` is carried into the finding (see Data Models).
 
 Outcomes per pair:
 
@@ -563,11 +670,11 @@ The original (unshrunk) sequence is the untainted prefix of the discovery sequen
 
 ### Phase 3: replay
 
-The generator emits one contract per shrunk sequence, `SeanceReplay<k>` (k = 1..10, matching the witness index), so no two replays share a record file. Each contract's `setUp` calls `handler.setOutputPath("seance-out/replay-<k>.jsonl")` before `handler.init()`, then runs the same setup as discovery (fresh deployments, recording on). Its single `test_replay` calls the handler with each shrunk handler calldata in order. The Runner executes the contracts one at a time (`--match-contract '^SeanceReplay<k>$'`), so a deadline kill affects only the replay in progress. Because the handler derives block time from `idx` and its state resets with `setUp`, the replay is deterministic. The shrunk handler calldata is baked into the generated contract after phase 2, so the generator runs once more for `Replay.t.sol` and writes only that file. The engine reads the replay records, takes the last record that has the selected function and `afterDivergence = false`, and compares its Classification with the original. If they are equal, the finding is built from the replay records: the failing call's calldata, sender, and value, and the preceding calls as the earlier records of the same sequence. If they differ, `chooseReported` falls back to the original sequence with `unshrunk: true`, `unshrunkReason: "replay-mismatch"`.
+The generator emits one contract per shrunk sequence, `SeanceReplay<k>` (k = 1..10, matching the witness index), so no two replays share a record file. Each contract's `setUp` calls `handler.setOutputPath("seance-out/replay-<k>.jsonl")` before `handler.init()`, then runs the same setup as discovery (fresh deployments, recording on). Its single `test_replay` calls the handler with each shrunk handler calldata in order. The Runner executes the contracts one at a time (`--match-contract '^SeanceReplay<k>$'`), so a deadline kill affects only the replay in progress. Because the handler derives block time from `idx` and its state resets with `setUp`, the replay is deterministic. The shrunk handler calldata is baked into the generated contract after phase 2, so the generator runs once more for `Replay.t.sol` and writes only that file. A non-zero exit from the replay run, or a replay file that `parseRecords` cannot parse, is `SEANCE_FAILED` naming the pair and the exit code or parse error; this is an engine-level failure, not an unshrunk disposition, because a replay the Runner cannot read gives no evidence either way. On a successful run, the engine reads the replay file's last fuzz sequence, takes the last untainted record (`afterDivergence = false`) with the pair's function, and compares its Classification with the pair's. If they are equal, the finding is built from that record: the failing call's calldata, sender, and value, and the preceding calls as the earlier records of the same replay sequence. If they differ, or no such record exists, `chooseReported` falls back to the original sequence with `unshrunk: true`, `unshrunkReason: "replay-mismatch"`.
 
 ### BEC acceptance runner
 
-`engine/src/seance/acceptance.ts` wraps `runSeance` and checks Requirement 9 and 10 conditions: an exorcism in `batchTransfer`, zero port bugs, first exorcism `fuzzOrdinal` at most 2,000, `_receivers` length 2..20, and replay confirmation. The `batchTransfer` finding must be shrunk and replay-confirmed (not `unshrunk`), which phase ordering supports because exorcised pairs are selected before port-bug pairs and always within the cap of 10 for BEC (setup pairs do not count toward the cap). Every check is a threshold on one campaign (exorcism present, `fuzzOrdinal` at most 2,000, zero port bugs, array length in range), never an exact count, hash, or sequence, because forge 1.5.1 campaigns are not reproducible from a seed (decision 16). The runner does not retry; a flaky result is a Known risk to investigate. A BEC acceptance run whose `batchTransfer` finding is `unshrunk` for any reason, including `deadline`, fails with `ACCEPTANCE_FAILED` naming the reason. It never overwrites `graveyard/bec/seance-report.json` on failure and returns the failing condition. The mutation variants (Planted_Port_Bug, Dropped_Emit_Mutation) are test-only ports produced by string-level edits in test fixtures, and must produce at least one `port-bug`.
+`engine/src/seance/acceptance.ts` (not shipped yet) will wrap `runSeance` and checks Requirement 9 and 10 conditions: an exorcism in `batchTransfer`, zero port bugs, first exorcism `fuzzOrdinal` at most 2,000, `_receivers` length 2..20, and replay confirmation. The `batchTransfer` finding must be shrunk and replay-confirmed (not `unshrunk`), which phase ordering supports because exorcised pairs are selected before port-bug pairs and always within the cap of 10 for BEC (setup pairs do not count toward the cap). Every check is a threshold on one campaign (exorcism present, `fuzzOrdinal` at most 2,000, zero port bugs, array length in range), never an exact count, hash, or sequence, because forge 1.5.1 campaigns are not reproducible from a seed (decision 16). The runner does not retry; a flaky result is a Known risk to investigate. A BEC acceptance run whose `batchTransfer` finding is `unshrunk` for any reason, including `deadline`, fails with `ACCEPTANCE_FAILED` naming the reason. It never overwrites `graveyard/bec/seance-report.json` on failure and returns the failing condition. The mutation variants (Planted_Port_Bug, Dropped_Emit_Mutation) are test-only ports produced by string-level edits in test fixtures, and must produce at least one `port-bug`. The BEC run reads the on-chain runtime code input from `graveyard/bec/runtime.hex`; the compiled legacy runtime code (from `out/LegacyBecToken.sol/BecToken.json`) equals that file once the 43-byte metadata suffix (the CBOR section solc 0.4.19 appends) is stripped from the compiled side, which the person who captured `runtime.hex` has verified by hand. The graveyard entry's contract is `BecToken` (`graveyard/bec/BecToken.sol`, `graveyard/bec/metadata.json`, `graveyard/bec/abi.json`, `graveyard/bec/runtime.hex`, `graveyard/bec/SOURCE.md`), not a contract literally named `Token`.
 
 - **Planted_Port_Bug** (`transferFrom` allowance not decremented) is not reached by setup, which only calls `transfer`. The finding comes from fuzzing, is shrunk and replay-confirmed, and has at most 3 preceding calls.
 - **Dropped_Emit_Mutation** removes the `Transfer` emit from the port's `transfer` path. It is expected to surface in setup, at the token-share `transfer`. The acceptance check expects a `port-bug` finding for `transfer` with `unshrunkReason: "setup"`, whose `differingFields` include `logs`, and it reports both Event_Logs lists. It does not expect a shrunk finding. Because the setup `port-bug` taints every fuzz record, the report holds no fuzz findings for this mutation, and the check does not require any.
@@ -842,13 +949,15 @@ Invariants: the four counts sum to `totalCalls`; keys are serialized in a fixed 
 | Function over `MAX_HANDLER_STACK` | n/a | Not an error. No handler is generated, its sites are unreachable, and it is listed in `skippedFunctions`. If forge still reports "Stack too deep", the run ends in `BUILD_FAILED`. |
 | Autopsy empty, non-JSON, over 10 MB | `AUTOPSY_REJECTED` | Message states which condition; no séance inputs. |
 | Autopsy `schemaVersion` missing, unsupported, schema violations, unknown functions | `AUTOPSY_REJECTED` | Details list every violation or function. |
-| Legacy solc absent | `SOLC_MISSING` | Names the version; `forge build` not invoked. |
+| Legacy solc absent | `SOLC_MISSING` | Names the version; checked before the temp directory is created, so `forge build` is not invoked and nothing is left on disk. |
 | `forge build` non-zero | `BUILD_FAILED` | Full compiler output and each failing source file. |
 | Runtime code mismatch | `BYTECODE_MISMATCH` | Reports both code hashes; séance not run. |
 | Constructor outcome differs or both revert | n/a | Classified per Requirement 2; the handler is `stopped`, and the séance ends with the setup records only. |
 | Deadline reached during `forge build` | `TIMEOUT` | One deadline for the whole run, started before the build. SIGTERM, then SIGKILL, so `forge` stops within 5 s. The error carries `phase: "build"` and no `partialCounts`. No report is written and discovery does not start. |
 | Deadline reached during discovery | `TIMEOUT` | Same deadline. SIGTERM, then SIGKILL, so `forge` stops within 5 s. The error carries `phase: "discovery"` and `partialCounts` from the complete lines of `records.jsonl`. No report is written. `TIMEOUT` is raised only for build and discovery. |
-| Deadline reached during witness or replay | n/a | Not an error. The running `forge` process is killed within 5 s, no further runs launch, and every pair not yet shrunk is reported with its original sequence, `unshrunk: true`, `unshrunkReason: "deadline"`. The report is written with `shrinking.deadlineReached = true`, and the run exits 0. |
+| Deadline reached during witness or replay | n/a | Not an error. The running `forge` process is killed within 5 s, no further runs launch, and every selected pair that has not completed both its witness campaign and its replay is reported with its original sequence, `unshrunk: true`, `unshrunkReason: "deadline"` (a pair whose witness had already passed keeps `witness-not-failed` instead). The report is written with `shrinking.deadlineReached = true`, and the run exits 0. |
+| `forge test` for discovery exits non-zero with no parseable JSON | `BUILD_FAILED` | Treated as a test-file compile failure (for example "Stack too deep" in a generated handler or test file); full compiler output and each failing source file, same as a failed `forge build`. |
+| Replay run exits non-zero, or its record file cannot be parsed | `SEANCE_FAILED` | Names the pair and the exit code or parse error; an engine-level failure, not a disposition. |
 | Finding from a setup record | n/a | Not an error. Phases 2 and 3 are skipped for it, and it is reported with `unshrunk: true`, `unshrunkReason: "setup"`. |
 | Handler reverts (internal error, out of gas) | `HANDLER_FAULT` | `fail_on_revert = true` fails the discovery invariant. The error carries `partialCounts` with the in-progress sequence removed, and no report is written. Deployment reverts and gas exhaustion inside the capped calls are not faults; they are classified normally. |
 | Handler/engine taint disagreement | `SEANCE_FAILED` | `verifyTaint` names the first mismatching record. |
@@ -876,7 +985,7 @@ If the Foundry run leaves a truncated last line in `records.jsonl` (for example 
 - `estimateHandlerStack` and `MAX_HANDLER_STACK`: a function at the limit is generated and one above it is skipped, using fixtures built from the constant, so the test does not hard-code a number. A separate forge build of the largest generated handler without `via_ir` checks the constant against the compiler.
 - Runner order with a mock forge: `forge build` runs before any `test/` file is written, the ABI is read from the build output, and `forge test` for discovery runs after `generateTestProject`. `Witness.t.sol` is rewritten between discovery and the first witness campaign, and no other file is touched.
 - Token-share setup is emitted only when the ABI has both `transfer(address,uint256)` and `balanceOf(address)`.
-- `parseCounterexample` against fixtures captured from the pinned Foundry version (`engine/test/fixtures/forge-json/failing.json` and `passing.json`): the failing fixture gives `calls` from `Sequence[1]` and `originalLength` from `Sequence[0]`, the passing fixture (`counterexample: null`) gives `found: false`, a fixture with a different `"<file>:<contract>"` key still parses, and a malformed `Sequence` gives `SEANCE_FAILED`.
+- `parseCounterexample` against fixtures captured from the pinned Foundry version (`engine/test/fixtures/forge-json/failing.json` and `passing.json`): the failing fixture gives `kind: "found"` with `calls` from `Sequence[1]` and `originalLength` from `Sequence[0]`, the passing fixture (`counterexample: null`) gives `kind: "none"`, a fixture with a different `"<file>:<contract>"` key still parses when it is the only match, a fixture with two matching results is `SEANCE_FAILED`, and a malformed `Sequence` gives `SEANCE_FAILED`.
 - Two séances for the same input use two different project directories, and the Runner never starts forge in a directory that already contains `cache/invariant`.
 - Mock-runner tests for `SOLC_MISSING` with no `forge build` call (1.10), `BUILD_FAILED` carrying output (1.11), `BYTECODE_MISMATCH` stopping before the séance (1.9), timeout default of 300 s (12.7), a deadline during `forge build` giving `TIMEOUT` with `phase: "build"`, no `partialCounts`, no report written, and no discovery process launched (12.8, 12.9), a zero budget before `forge build` launching no process and giving the same error, a build that consumes most of the budget leaving discovery only the remainder, a deadline during discovery giving `TIMEOUT` with `phase: "discovery"` and partial counts (12.8, 12.10), a deadline during witness and a deadline during replay each giving a written report, exit status 0, `shrinking.deadlineReached = true`, and `unshrunkReason: "deadline"` for every unfinished pair while finished pairs stay shrunk, a zero budget before the witness phase launching no `forge` process, `HANDLER_FAULT` on a failed discovery invariant, and structured errors for other failures (12.6).
 - Witness-not-failed, replay-mismatch, over-cap, deadline, and setup each produce the documented `unshrunkReason` in the report. A setup finding launches no witness or replay run.
@@ -922,5 +1031,5 @@ If the Foundry run leaves a truncated last line in `records.jsonl` (for example 
 - **Native-only verification.** Tasks 1.5 and 1.7, which this `foundry.toml` scheme (top-level-solc-free restrictions, `additional_compiler_profiles` plus `min_optimizer_runs` and `max_optimizer_runs`, the forge-std and test restrictions) is based on, ran natively (forge 1.5.1-stable on the host, not the séance worker's linux/amd64 Docker image). Docker verification of the same scheme, including `--offline` behaviour with only the image's two pinned solc versions installed, is pending.
 - **Wall-clock time with recording on.** Discovery makes 256 x 64 = 16,384 counted handler calls, and Foundry's post-campaign replay of the final run adds 64 more recorded calls (16,448 lines in total, not counted in the report). Each call runs two deployment calls, a state read for each side, and one `vm.writeLine`, and every `vm.writeLine` goes through the `fs_permissions` check and a file append. Together with `vm.recordLogs` this may exceed the 300 s default timeout on slower machines, and a discovery timeout fails the run, and a slow first-time `forge build` (two solc versions, cold cache) also draws on the same deadline and leaves less time for discovery. The first Docker run measures the time per call and the total. Task 1.8 and task 8.3 measured full-scale (256 x 64) discovery natively: about 1.9 s on the token fixture (`batchTransfer` exorcised at fuzz call 2 and in all 257 sequences, 0 reverts) and about 20 s on the wallet fixture (13 s with `SEANCE_RECORD=0`; 25 state reads per side per call). State-read cost grows with the number of getters. The handler compares a keccak hash of each side's state first and runs the quadratic state diff only when the hashes differ. Mitigations, in order: (1) keep `runs = 256` and `depth = 64` and raise the default timeout for graveyard runs; (2) not available: buffering records in handler memory and writing them with `vm.writeFile` was rejected, because handler storage resets at the start of every run so the buffer would be lost, and it would not remove the duplicate replay run (decision 13); (3) write `stateFields` only for `port-bug` records (already the case) and drop the per-call state read when the call reverted on both sides; (4) lower `depth` while keeping `runs`, which must stay equal to the value reported in `report.runs` and `report.depth`.
 - The first witness campaign also runs 256 x 64 handler calls with recording off, per pair, and up to 10 pairs, so the shared deadline is more likely to cut witness and replay than discovery. This is the reason a deadline there is a reported outcome (`unshrunkReason: "deadline"`) and not an error.
-- **Handler stack limit (decision 19).** `MAX_HANDLER_STACK` and the weights in `estimateHandlerStack` are set from a compile experiment, and no value is fixed by this design. Without `via_ir`, a function with many compound parameters (for example several dynamic arrays, `bytes`, or `string` parameters) can exceed the limit. Such functions are not fuzzed: they get no handler, their Arithmetic_Sites are reported as unreachable, and they appear in `skippedFunctions`. This is a known coverage limitation, and an unfuzzed function can hide a divergence. `via_ir` was rejected because it slows every build, and build time is inside the 300 s deadline. If the estimator under-counts, `forge test` fails with "Stack too deep" and the run ends in `BUILD_FAILED`.
+- **Handler stack limit (decision 19).** `MAX_HANDLER_STACK = 16` and the `STACK_COST` weights in `estimateHandlerStack` were set from a compile experiment on native forge 1.5.1 (task 8.5), exact on about 1,300 compiled signatures and `GeneratorOptions.maxHandlerStack` remains available to recalibrate if a later Foundry or solc version shifts the limit. Without `via_ir`, a function with many compound parameters (for example several dynamic arrays, `bytes`, or `string` parameters) can exceed the limit. Such functions are not fuzzed: they get no handler, their Arithmetic_Sites are reported as unreachable, and they appear in `skippedFunctions`. This is a known coverage limitation, and an unfuzzed function can hide a divergence. `via_ir` was rejected because it slows every build, and build time is inside the 300 s deadline. If the estimator under-counts, `forge test` fails with "Stack too deep" and the run ends in `BUILD_FAILED`.
 - **ABI and ordering.** The ABI is read from forge output after `forge build`, so an autopsy rejection or an ABI mismatch is detected only after the `src/` build has used part of the deadline. The ABI match ignores constructor and fallback/receive differences on purpose (they surface as classified divergences), so a port that changes only those is not rejected up front.

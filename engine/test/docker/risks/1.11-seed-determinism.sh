@@ -2,6 +2,7 @@
 # Task 1.11, Risk 9 (native only): seed determinism of discovery (Part 1) and of a rare witness (Part 2).
 # Every run uses a FRESH scratch directory (fresh copy of fixtures/token, no cache/ or out/ reuse).
 # Exit code reflects Part 1 only (PASS = 5 identical hashes and class counts). Part 2 variation is a finding.
+# harness: native-only
 set -uo pipefail
 
 RUNS=256

@@ -475,12 +475,12 @@ compilation_restrictions = [
     - A port whose ABI differs from the legacy ABI by function name or by an input type gives `INVALID_INPUT` naming every differing function. A port that differs only in `stateMutability` (for example `constant` to `view`) passes.
     - _Requirements: 1.12_
 
-- [ ] 11. Entry point and CLI
-  - [ ] 11.1 Implement `entry.ts`
+- [x] 11. Entry point and CLI
+  - [x] 11.1 Implement `entry.ts`
     - `runSeance(input, opts)` validates input, parses the Autopsy report, generates targets and the project, runs the Runner, writes `graveyard/<name>/seance-report.json`, and returns the report or rejects with a `SeanceError`. Wrap unexpected failures as `SEANCE_FAILED`.
     - _Requirements: 12.1, 12.2, 12.4, 12.5, 12.6, 12.7_
 
-  - [ ] 11.2 Implement the CLI binary
+  - [x] 11.2 Implement the CLI binary
     - Read inputs from arguments or a JSON file, print the report or structured error as JSON, and exit 0 on success and non-zero on any error.
     - _Requirements: 12.3, 12.4, 12.5, 12.6_
 
@@ -491,8 +491,8 @@ compilation_restrictions = [
 - [ ] 12. Checkpoint - Core path complete
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 13. BEC end-to-end acceptance
-  - [ ] 13.0 Hand-write the golden BEC port and the BEC Autopsy report
+- [x] 13. BEC end-to-end acceptance
+  - [x] 13.0 Hand-write the golden BEC port and the BEC Autopsy report
     - Depends on: the legacy BEC source in the `graveyard/bec/` entry, and tasks 4.1 and 4.2 (the Autopsy schema and parser).
     - Read the legacy BEC source from the existing `graveyard/bec/` entry (solc 0.4.19, optimizer off). Fetching it (Sourcify first, Etherscan second) is the fetcher's concern and not part of this task. If the `graveyard/bec/` source or metadata is missing, say so and ask the user before continuing.
     - Write `graveyard/bec/port.golden.sol`, a hand-made Solidity 0.8 port of BEC with no logic changes, applying the workspace rewrite rules: SafeMath calls become checked operators (R1), the contract-named constructor becomes `constructor` (R2), `abstract`, `virtual`, and `override` follow real C3 linearization semantics and are not guessed by pattern (R3), arrays in external functions become `calldata` (R4), `constant` functions become `view` (R5), event calls become `emit` (R6), and `function ()` becomes `fallback()` (R7). Keep the contract name `BecToken` as in the legacy source, so artifact names match. Bug fixes come only from 0.8's built-in checks.
@@ -502,17 +502,17 @@ compilation_restrictions = [
     - Note: the future Resurrection spec will use `graveyard/bec/port.golden.sol` as its expected output. Do not change it later to make the Resurrection output match without a recorded reason.
     - _Requirements: 9.1, 11.1, 11.5, 11.6, 11.8_
 
-  - [ ] 13.1 Add BEC inputs under `graveyard/bec/`
+  - [x] 13.1 Add BEC inputs under `graveyard/bec/`
     - Depends on: 13.0.
     - Use the legacy BEC source from the `graveyard/bec/` entry (solc 0.4.19, optimizer off), `graveyard/bec/port.golden.sol` as the Port_Contract, `graveyard/bec/autopsy.json` as the Autopsy_Report, and the mainnet runtime code for `0xC5d105E63711398aF9bbff092d4B6769C82F793D`. Do not wait for the Resurrection stage.
     - Add the loader that assembles these four inputs into a `SeanceInput` for the acceptance run. If the runtime code is not yet stored in the entry, say so and ask the user for it.
     - _Requirements: 9.1_
 
-  - [ ] 13.2 Implement `acceptance.ts`
+  - [x] 13.2 Implement `acceptance.ts`
     - Wrap `runSeance` and check: an `exorcised` finding in `batchTransfer`, zero `port-bug` counts, first exorcism `fuzzOrdinal` at most 2,000, shrunk `_receivers` length 2 to 20 with `length * _value >= 2^256` and wrapped product at most the sender's legacy balance, and replay-confirmed (not `unshrunk`). All checks are thresholds or invariants (the Classification counts sum to `totalCalls`), never exact counts, because forge 1.5.1's fuzzer is not reproducible from a seed. On failure return `ACCEPTANCE_FAILED` naming the condition or `unshrunkReason`, and do not overwrite `graveyard/bec/seance-report.json`.
     - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.7, 9.8_
 
-  - [ ] 13.3 Run the BEC acceptance in Docker
+  - [x] 13.3 Run the BEC acceptance in Docker
     - Run the CLI on BEC in the linux/amd64 image: generate project, build, bytecode check, discovery, witness shrinking, replay, report written. Assert the report is stored in `graveyard/bec/`, `setupCalls` equals actor count minus one plus seed calls, and the `batchTransfer` finding is shrunk with zero port bugs. If it fails, fix the cause or apply the design adjustment from task 1.
     - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 12.1_
 
