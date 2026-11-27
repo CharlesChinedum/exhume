@@ -12,3 +12,7 @@ engine/test/docker/.cache/
 
 # Séance output
 seance-out/
+
+# Environment variables (the worker reads these); commit only the example
+.env*
+!.env.example

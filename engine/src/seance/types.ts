@@ -393,6 +393,11 @@ export interface SeanceReport {
   counts: ClassificationCounts;
   taintedCalls: number; // already inside counts
   setupCalls: number; // already inside counts
+  /**
+   * `fuzzOrdinal` of the first `exorcised` Fuzz_Record: 1-based among records with `idx >= 0`; setup records and
+   * the replay tail are excluded. `null` when no fuzz record is `exorcised`.
+   */
+  firstExorcismFuzzOrdinal: number | null;
   exorcisms: Finding[];
   portBugs: Finding[];
   sequenceResults: { total: number; endedExorcised: number; exorcisedAtIndex: number[] };

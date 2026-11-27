@@ -14,7 +14,6 @@ import {
   checkBecAcceptance,
   decodeBatchTransfer,
   deriveSenderLegacyBalance,
-  firstExorcismFuzzOrdinal,
   runBecAcceptance,
   type BecAcceptanceDeps,
 } from "../../src/seance/acceptance.js";
@@ -81,6 +80,7 @@ function report(over: Partial<SeanceReport> = {}, finding: Finding | null = shru
     counts: { match: 94, "reason-modernised": 5, exorcised: 1, "port-bug": 0 },
     taintedCalls: 0,
     setupCalls: 4,
+    firstExorcismFuzzOrdinal: 90,
     exorcisms: finding ? [finding] : [],
     portBugs: [],
     sequenceResults: { total: 3, endedExorcised: 1, exorcisedAtIndex: [4] },
@@ -98,7 +98,12 @@ function report(over: Partial<SeanceReport> = {}, finding: Finding | null = shru
     ...over,
   };
 }
-const good = { firstExorcismFuzzOrdinal: 120, legacyBalanceOf: () => BALANCE };
+/** A report whose first exorcism is fuzz record `n` (setup 4, one exorcised record, 5 reason-modernised). */
+const withOrdinal = (n: number | null, finding: Finding | null = shrunk()): SeanceReport => {
+  const total = (n ?? 96) + 4;
+  return report({ totalCalls: total, counts: { match: total - 6, "reason-modernised": 5, exorcised: 1, "port-bug": 0 }, firstExorcismFuzzOrdinal: n }, finding);
+};
+const good = { legacyBalanceOf: () => BALANCE };
 const failedOf = (r: ReturnType<typeof checkBecAcceptance>) => {
   if (r.ok) throw new Error("expected ACCEPTANCE_FAILED");
   expect(r.error.code).toBe("ACCEPTANCE_FAILED");
@@ -111,7 +116,7 @@ describe("checkBecAcceptance (pure)", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value).toMatchObject({
-      firstExorcismFuzzOrdinal: 120,
+      firstExorcismFuzzOrdinal: 90,
       receivers: 5,
       value: (TWO / 5n + 3n).toString(),
       wrappedProduct: "14",
@@ -147,11 +152,11 @@ describe("checkBecAcceptance (pure)", () => {
   });
 
   it("budget: fuzzOrdinal 2000 passes, 2001 fails, unknown fails", () => {
-    expect(checkBecAcceptance(report(), { ...good, firstExorcismFuzzOrdinal: BEC_FUZZ_BUDGET }).ok).toBe(true);
-    expect(failedOf(checkBecAcceptance(report(), { ...good, firstExorcismFuzzOrdinal: 2001 }))).toEqual([
+    expect(checkBecAcceptance(withOrdinal(BEC_FUZZ_BUDGET), good).ok).toBe(true);
+    expect(failedOf(checkBecAcceptance(withOrdinal(2001), good))).toEqual([
       { condition: "call-budget-exceeded", observed: 2001, expected: "fuzzOrdinal of the first batchTransfer exorcism at most 2000" },
     ]);
-    expect(failedOf(checkBecAcceptance(report(), { ...good, firstExorcismFuzzOrdinal: null }))[0]).toMatchObject({
+    expect(failedOf(checkBecAcceptance(withOrdinal(null), good))[0]).toMatchObject({
       condition: "call-budget-exceeded",
       observed: null,
     });
@@ -201,7 +206,7 @@ describe("checkBecAcceptance (pure)", () => {
     ]);
     // Boundary: balance equal to the wrapped product passes.
     expect(checkBecAcceptance(report({}, shrunk({ calldata: batchCalldata(5, v) })), { ...good, legacyBalanceOf: () => wrapped }).ok).toBe(true);
-    expect(failedOf(checkBecAcceptance(report(), { firstExorcismFuzzOrdinal: 1 }))[0]).toMatchObject({
+    expect(failedOf(checkBecAcceptance(report(), {}))[0]).toMatchObject({
       condition: "wrapped-product-above-balance",
       observed: { senderLegacyBalance: "unavailable" },
     });
@@ -216,10 +221,10 @@ describe("checkBecAcceptance (pure)", () => {
 
   it("reports several failures together", () => {
     const f = failedOf(
-      checkBecAcceptance(report({ counts: { match: 94, "reason-modernised": 4, exorcised: 1, "port-bug": 1 } }, unshrunkFinding("deadline")), {
-        firstExorcismFuzzOrdinal: 5000,
-        legacyBalanceOf: () => BALANCE,
-      }),
+      checkBecAcceptance(
+        { ...withOrdinal(5000, unshrunkFinding("deadline")), counts: { match: 4998, "reason-modernised": 4, exorcised: 1, "port-bug": 1 } },
+        good,
+      ),
     );
     expect(f.map((x) => x.condition)).toEqual(["port-bug-count", "call-budget-exceeded", "unshrunk"]);
   });
@@ -272,13 +277,6 @@ describe("records-derived inputs", () => {
   const parsed = parseRecords(jsonl(stream), 256);
   if (!parsed.ok) throw new Error(parsed.error.message);
 
-  it("firstExorcismFuzzOrdinal counts fuzz records only (setup excluded) and is null without an exorcism", () => {
-    expect(firstExorcismFuzzOrdinal(parsed.value)).toBe(2);
-    const none = parseRecords(jsonl(stream.slice(0, 5)), 256);
-    if (!none.ok) throw new Error("parse");
-    expect(firstExorcismFuzzOrdinal(none.value)).toBeNull();
-  });
-
   it("derives the sender balance from the setup shares and modelled preceding calls (exact)", () => {
     const f = shrunk({ sender: A1, precedingCalls: [{ function: "transfer", calldata: transferCalldata(A2, 1000n), sender: A1, value: "0" }] });
     expect(deriveSenderLegacyBalance(parsed.value.setupRecords, f)).toMatchObject({ balance: SHARE - 1000n, approximate: false });
@@ -322,7 +320,7 @@ function stubDeps(root: string, rep: SeanceReport, lines: RecordLine[]): BecAcce
 }
 const stubLines = (): RecordLine[] => [...setupLines(), rec(0, "batchTransfer", batchCalldata(5, TWO / 5n + 3n), A1, "exorcised")];
 const stubReport = (finding: Finding = shrunk(), over: Partial<SeanceReport> = {}): SeanceReport =>
-  report({ totalCalls: 5, counts: { match: 4, "reason-modernised": 0, exorcised: 1, "port-bug": 0 }, setupCalls: 4, sequenceResults: { total: 1, endedExorcised: 1, exorcisedAtIndex: [0] }, ...over }, finding);
+  report({ totalCalls: 5, counts: { match: 4, "reason-modernised": 0, exorcised: 1, "port-bug": 0 }, setupCalls: 4, sequenceResults: { total: 1, endedExorcised: 1, exorcisedAtIndex: [0] }, firstExorcismFuzzOrdinal: 1, ...over }, finding);
 
 describe("runBecAcceptance with a stubbed séance", () => {
   it("writes the report to <root>/bec/seance-report.json on a pass and removes the temp project", async () => {

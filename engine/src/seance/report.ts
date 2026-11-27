@@ -728,6 +728,13 @@ export function buildReport(args: BuildReportArgs): SeanceReport {
     if (unreachable.has(s.id) && !unreachableSites.includes(s.id)) unreachableSites.push(s.id);
   }
 
+  let firstExorcismFuzzOrdinal: number | null = null;
+  for (const r of parsed.records) {
+    if (r.idx >= 0 && r.classification === "exorcised" && r.fuzzOrdinal !== undefined) {
+      firstExorcismFuzzOrdinal = r.fuzzOrdinal;
+      break;
+    }
+  }
   return {
     schemaVersion: "1",
     contract: args.contract,
@@ -738,6 +745,7 @@ export function buildReport(args: BuildReportArgs): SeanceReport {
     counts: { ...parsed.counts },
     taintedCalls: parsed.taintedCalls,
     setupCalls: parsed.setupCalls,
+    firstExorcismFuzzOrdinal,
     exorcisms,
     portBugs,
     sequenceResults: {
@@ -771,6 +779,18 @@ function semanticViolations(r: SeanceReport): string[] {
   if (r.taintedCalls > r.totalCalls) v.push(`taintedCalls ${r.taintedCalls} exceeds totalCalls ${r.totalCalls}`);
   if (r.setupCalls > r.totalCalls) v.push(`setupCalls ${r.setupCalls} exceeds totalCalls ${r.totalCalls}`);
 
+  const fuzzCalls = r.totalCalls - r.setupCalls;
+  const ord = r.firstExorcismFuzzOrdinal;
+  if (ord === null) {
+    // A setup-only exorcism leaves counts.exorcised > 0 with a null ordinal (Requirement 7.13).
+    const fuzzFinding = r.exorcisms.find((f) => !(f.unshrunk === true && f.unshrunkReason === "setup"));
+    if (fuzzFinding !== undefined) {
+      v.push(`firstExorcismFuzzOrdinal is null but exorcisms holds a finding for ${fuzzFinding.function} that is not a setup finding`);
+    }
+  } else {
+    if (r.counts.exorcised === 0) v.push(`firstExorcismFuzzOrdinal is ${ord} but counts.exorcised is 0`);
+    if (ord > fuzzCalls) v.push(`firstExorcismFuzzOrdinal ${ord} exceeds the fuzz record count ${fuzzCalls}`);
+  }
   const s = r.shrinking;
   const others = s.pairsSetup + s.pairsShrunk + s.pairsUnshrunk + s.pairsOverCap;
   if (s.pairsFound !== others) {
@@ -879,6 +899,7 @@ export function serializeReport(report: SeanceReport): string {
     },
     taintedCalls: report.taintedCalls,
     setupCalls: report.setupCalls,
+    firstExorcismFuzzOrdinal: report.firstExorcismFuzzOrdinal,
     exorcisms: report.exorcisms.map(orderFinding),
     portBugs: report.portBugs.map(orderFinding),
     sequenceResults: {

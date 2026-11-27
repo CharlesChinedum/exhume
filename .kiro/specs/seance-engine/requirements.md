@@ -46,6 +46,7 @@ The generator lives in `engine/` and is invoked through a local command-line and
 - **BEC**: BeautyChain, mainnet address `0xC5d105E63711398aF9bbff092d4B6769C82F793D`, solc 0.4.19, optimizer off.
 - **Setup_Record**: A Call_Record produced during setup (constructor, token-share transfer, or seed call) and marked `idx == -1`.
 - **Fuzz_Record**: A Call_Record produced by a fuzzed handler call, marked `idx >= 0`.
+- **Fuzz_Ordinal**: The 1-based position of a Fuzz_Record among all Fuzz_Records of the Discovery_Phase, in execution order. Setup_Records and the calls that Foundry re-executes after the campaign (shrinking and replay) are not counted.
 - **Finding_Pair**: A (function, Classification) pair, with Classification `exorcised` or `port-bug`, whose first record with `afterDivergence=false` yields one finding.
 - **Discovery_Phase**: The séance phase that runs the fuzz campaign and collects Call_Records.
 - **Witness_Phase**: The séance phase that runs one Foundry_Shrinking campaign per selected Finding_Pair.
@@ -179,6 +180,7 @@ The generator lives in `engine/` and is invoked through a local command-line and
 10. THE Séance_Report SHALL contain Classification counts whose sum equals the total number of calls.
 11. WHEN the same inputs and the same fuzz seed are used in two séances, THE Séance_Engine SHALL produce Séance_Reports with an identical total number of calls and an identical number of runs, where the Classification counts of each Séance_Report satisfy criterion 10.
 12. THE Séance_Report SHALL contain a `shrinking` object with the required fields `witnessCap`, `pairsFound`, `pairsSetup`, `pairsShrunk`, `pairsUnshrunk`, `pairsOverCap`, and `deadlineReached`, where `pairsSetup` is the number of Finding_Pairs reported with Unshrunk_Reason `setup`, `pairsOverCap` is the number reported with `witness-cap`, `pairsUnshrunk` is the number reported with `witness-not-failed`, `replay-mismatch`, or `deadline`, `deadlineReached` is true when the Deadline was reached during the Witness_Phase or the Replay_Phase, and `pairsFound` equals the sum of `pairsSetup`, `pairsShrunk`, `pairsUnshrunk`, and `pairsOverCap`.
+13. THE Séance_Report SHALL contain the field `firstExorcismFuzzOrdinal`, whose value is the Fuzz_Ordinal of the first Fuzz_Record classified as `exorcised`, or null WHEN the séance has no Fuzz_Record classified as `exorcised`.
 
 ### Requirement 8: Shrinking
 
@@ -204,7 +206,7 @@ The generator lives in `engine/` and is invoked through a local command-line and
 
 1. WHEN a séance runs on the BEC original bytecode (mainnet address `0xC5d105E63711398aF9bbff092d4B6769C82F793D`, compiled with solc 0.4.19, optimizer off) and its 0.8 port, THE Séance_Engine SHALL classify at least one divergence in `batchTransfer` as `exorcised` (legacy succeeds, 0.8 reverts with `Panic(0x11)`).
 2. WHEN a séance runs on BEC and its 0.8 port, THE Séance_Engine SHALL report zero divergences classified as `port-bug` across all functions.
-3. WHEN a séance runs on BEC and its 0.8 port, THE Séance_Engine SHALL find the first `batchTransfer` exorcised divergence within 2,000 fuzz calls, using inputs generated from the autopsy-identified unchecked arithmetic sites.
+3. WHEN a séance runs on BEC and its 0.8 port, THE Séance_Engine SHALL find the first `batchTransfer` exorcised divergence within 2,000 fuzz calls, using inputs generated from the autopsy-identified unchecked arithmetic sites, so that `firstExorcismFuzzOrdinal` in the Séance_Report is not null and is at most 2,000.
 4. WHEN a séance on BEC reports the `batchTransfer` exorcised divergence, THE Séance_Report SHALL contain shrunk calldata in which the `_receivers` array length is between 2 and 20 inclusive, the product of the `_receivers` array length and `_value` is at least `2^256`, and the Wrapped_Product is less than or equal to the sender's balance in the Legacy_Deployment at the time of the call.
 5. WHEN a séance on BEC reports the `batchTransfer` exorcised divergence, THE Séance_Engine SHALL accept the divergence only when the finding is shrunk and the replay of Requirement 8 criterion 2 on freshly deployed instances yields the Classification `exorcised`.
 6. WHEN a séance on BEC completes and the BEC acceptance run has not failed, THE Exhume system SHALL store the Séance_Report in the `graveyard/bec/` directory, so that it is available as the precomputed report for the BEC entry.

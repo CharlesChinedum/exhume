@@ -125,6 +125,29 @@ function args(over: Partial<BuildReportArgs> = {}, parsed = loadFixture(), repla
   };
 }
 const build = (over: Partial<BuildReportArgs> = {}): SeanceReport => buildReport(args(over));
+/** Independent scan of the raw records: first exorcised fuzz line, counted among kept fuzz lines (a first exorcism has no earlier exorcised record to truncate after). */
+function scanFirstExorcismOrdinal(records: RecordLine[], runs: number): number | null {
+  let seq = -1;
+  let ordinal = 0;
+  for (const r of records) {
+    if (r.idx === -1) continue;
+    if (r.idx === 0) {
+      seq++;
+    }
+    if (seq >= runs) return null; // replay tail
+    ordinal++;
+    if (r.classification === "exorcised") return ordinal;
+  }
+  return null;
+}
+function mutateFixture(f: (r: RecordLine, i: number) => RecordLine): string {
+  return fixtureRecords.map((r, i) => JSON.stringify(f(r, i))).join("\n") + "\n";
+}
+function buildFrom(text: string, runs: number): SeanceReport {
+  const p = parseRecords(text, runs);
+  if (!p.ok) throw new Error(p.error.message);
+  return buildReport(args({}, p.value));
+}
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 // --- buildReport ------------------------------------------------------------
@@ -194,6 +217,34 @@ describe("buildReport on the token-small fixture", () => {
     expect(() => buildReport(args({ dispositions: pending }))).toThrow(/pending/);
   });
 
+  it("sets firstExorcismFuzzOrdinal to the first exorcised fuzz record, found by scanning the JSONL", () => {
+    // Line 8 is the first fuzz record (ordinal 1), line 9 the first exorcised one (ordinal 2).
+    expect(scanFirstExorcismOrdinal(fixtureRecords, 5)).toBe(2);
+    expect(report.firstExorcismFuzzOrdinal).toBe(2);
+  });
+  it("is null when no fuzz record is exorcised", () => {
+    const text = mutateFixture((r, i) => (i >= 7 && r.classification === "exorcised" ? { ...r, classification: "match" } : r));
+    const r = buildFrom(text, 5);
+    expect(r.counts.exorcised).toBe(0);
+    expect(r.firstExorcismFuzzOrdinal).toBeNull();
+    expect(validateReport(r).ok).toBe(true);
+  });
+  it("is null for a setup-only exorcism, which still counts in counts.exorcised", () => {
+    const text = mutateFixture((r, i) => (i === 1 ? { ...r, classification: "exorcised" } : i >= 7 && r.classification === "exorcised" ? { ...r, classification: "match" } : r));
+    const r = buildFrom(text, 5);
+    expect(r.counts.exorcised).toBe(1);
+    expect(r.firstExorcismFuzzOrdinal).toBeNull();
+    expect(r.exorcisms.every((f) => f.unshrunk === true && f.unshrunkReason === "setup")).toBe(true);
+    expect(validateReport(r).ok).toBe(true);
+  });
+  it("ignores the replay tail and records after an exorcism in the same sequence", () => {
+    // Lines 9, 11 and 13 become matches, so the first exorcism is line 19 (sequence 4, ordinal 12).
+    const text = mutateFixture((r, i) => ([8, 10, 12].includes(i) ? { ...r, classification: "match" } : r));
+    const expected = scanFirstExorcismOrdinal(JSON.parse(`[${text.trim().split("\n").join(",")}]`) as RecordLine[], 4);
+    expect(expected).toBe(12);
+    // runs = 4: lines 20-25 are the replay tail, which also holds an exorcised record.
+    expect(buildFrom(text, 4).firstExorcismFuzzOrdinal).toBe(12);
+  });
   it("is accepted by validateReport", () => {
     const v = validateReport(report);
     expect(v.ok).toBe(true);
@@ -324,6 +375,26 @@ describe("validateReport", () => {
   }, /unshrunkReason|schema/);
   rejects("a skippedFunctions reason other than stack", (r) => (r.skippedFunctions[0].reason = "gas"), /reason/);
   rejects("taintedCalls above totalCalls", (r) => (r.taintedCalls = r.totalCalls + 1), /taintedCalls/);
+  rejects("a missing firstExorcismFuzzOrdinal", (r) => delete r.firstExorcismFuzzOrdinal, /firstExorcismFuzzOrdinal/);
+  rejects("firstExorcismFuzzOrdinal 0", (r) => (r.firstExorcismFuzzOrdinal = 0), /firstExorcismFuzzOrdinal/);
+  rejects("a negative firstExorcismFuzzOrdinal", (r) => (r.firstExorcismFuzzOrdinal = -3), /firstExorcismFuzzOrdinal/);
+  rejects("a non-integer firstExorcismFuzzOrdinal", (r) => (r.firstExorcismFuzzOrdinal = 1.5), /firstExorcismFuzzOrdinal/);
+  rejects("a string firstExorcismFuzzOrdinal", (r) => (r.firstExorcismFuzzOrdinal = "2"), /firstExorcismFuzzOrdinal/);
+  rejects(
+    "a non-null firstExorcismFuzzOrdinal when counts.exorcised is 0",
+    (r) => {
+      r.counts.match += r.counts.exorcised;
+      r.counts.exorcised = 0;
+    },
+    /counts\.exorcised is 0/,
+  );
+  rejects("a firstExorcismFuzzOrdinal beyond the fuzz record count", (r) => (r.firstExorcismFuzzOrdinal = r.totalCalls - r.setupCalls + 1), /exceeds the fuzz record count/);
+  rejects("a null firstExorcismFuzzOrdinal with a fuzz exorcism finding", (r) => (r.firstExorcismFuzzOrdinal = null), /not a setup finding/);
+  it("accepts the fuzz record count as the largest ordinal", () => {
+    const r: any = clone(good);
+    r.firstExorcismFuzzOrdinal = r.totalCalls - r.setupCalls;
+    expect(validateReport(r).ok).toBe(true);
+  });
   rejects("an extra top-level property", (r) => (r.extra = 1), /additional/);
 });
 
@@ -336,7 +407,7 @@ describe("serializeReport / parseReport", () => {
   it("emits the canonical top-level key order, 2-space indent, and one trailing newline", () => {
     expect(Object.keys(JSON.parse(text))).toEqual([
       "schemaVersion", "contract", "seed", "runs", "depth", "totalCalls", "counts", "taintedCalls", "setupCalls",
-      "exorcisms", "portBugs", "sequenceResults", "shrinking", "unreachableSites", "skippedFunctions",
+      "firstExorcismFuzzOrdinal", "exorcisms", "portBugs", "sequenceResults", "shrinking", "unreachableSites", "skippedFunctions",
     ]);
     expect(text.startsWith('{\n  "schemaVersion": "1",')).toBe(true);
     expect(text.endsWith("}\n")).toBe(true);
@@ -345,6 +416,17 @@ describe("serializeReport / parseReport", () => {
       "function", "classification", "calldata", "sender", "value", "precedingCalls", "originalLength", "site",
     ]);
     expect(Object.keys(JSON.parse(text).counts)).toEqual(["match", "reason-modernised", "exorcised", "port-bug"]);
+  });
+  it("round-trips firstExorcismFuzzOrdinal as a number and as null", () => {
+    expect(JSON.parse(text).firstExorcismFuzzOrdinal).toBe(2);
+    const a = parseReport(text);
+    expect(a.ok && a.value.firstExorcismFuzzOrdinal).toBe(2);
+    const none = buildFrom(mutateFixture((r, i) => (i >= 7 && r.classification === "exorcised" ? { ...r, classification: "match" } : r)), 5);
+    const nullText = serializeReport(none);
+    expect(JSON.parse(nullText).firstExorcismFuzzOrdinal).toBeNull();
+    const b = parseReport(nullText);
+    expect(b.ok && b.value).toEqual(none);
+    expect(serializeReport(b.ok ? b.value : none)).toBe(nullText);
   });
   it("does not depend on the key order of the input", () => {
     const shuffled = JSON.parse(JSON.stringify(Object.fromEntries(Object.entries(report).reverse()))) as SeanceReport;

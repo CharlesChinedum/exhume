@@ -10,22 +10,34 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ENGINE } from "./template-project.js";
-import { BEC_FUNCTION } from "../../src/seance/acceptance.js";
+import { BEC_FUNCTION, BEC_FUZZ_BUDGET } from "../../src/seance/acceptance.js";
 import { parseReport, validateReport } from "../../src/seance/report.js";
 import { CLASSIFICATIONS, isPortBugFinding, isUnshrunkFinding } from "../../src/seance/types.js";
 
 const REPORT = resolve(ENGINE, "../graveyard/bec/seance-report.json");
+const STALE = "stale report: regenerate with the Docker run (graveyard/bec/seance-report.json has no firstExorcismFuzzOrdinal)";
 const ACTOR_COUNT = 4; // [deployer, A1, A2, A3]
 const CONSTRUCTOR_RECORDS = 1;
 
 describe.skipIf(!existsSync(REPORT))("graveyard/bec/seance-report.json (Docker acceptance run)", () => {
-  const parsed = existsSync(REPORT) ? parseReport(readFileSync(REPORT, "utf8")) : undefined;
+  const raw = existsSync(REPORT) ? readFileSync(REPORT, "utf8") : "";
+  const stale = raw !== "" && !raw.includes('"firstExorcismFuzzOrdinal"');
+  const parsed = existsSync(REPORT) ? parseReport(raw) : undefined;
   const report = () => {
+    if (stale) throw new Error(STALE);
     if (parsed === undefined || !parsed.ok) throw new Error(parsed?.ok === false ? parsed.error.message : "no report");
     return parsed.value;
   };
 
+  it("is current and records the first exorcism within the 2,000-call budget", () => {
+    if (stale) throw new Error(STALE);
+    const n = report().firstExorcismFuzzOrdinal;
+    expect(Number.isInteger(n)).toBe(true);
+    expect(n).toBeGreaterThanOrEqual(1);
+    expect(n).toBeLessThanOrEqual(BEC_FUZZ_BUDGET);
+  });
   it("parses and validates", () => {
+    if (stale) throw new Error(STALE);
     expect(parsed?.ok).toBe(true);
     expect(validateReport(report()).ok).toBe(true);
     expect(report().contract).toBe("BecToken");

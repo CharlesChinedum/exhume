@@ -69,6 +69,7 @@ const report: SeanceReport = {
   counts: { match: 5, "reason-modernised": 2, exorcised: 2, "port-bug": 1 },
   taintedCalls: 0,
   setupCalls: 1,
+  firstExorcismFuzzOrdinal: 4,
   exorcisms: [exorcised],
   portBugs: [portBug],
   sequenceResults: { total: 3, endedExorcised: 1, exorcisedAtIndex: [4] },
@@ -150,6 +151,15 @@ describe("seance-report schema", () => {
       mutate(r);
       expect(validateReport(r)).toBe(false);
     });
+  it("accepts a null and a positive integer firstExorcismFuzzOrdinal", () => {
+    expect(validateReport({ ...clone(report), firstExorcismFuzzOrdinal: null })).toBe(true);
+    expect(validateReport({ ...clone(report), firstExorcismFuzzOrdinal: 1 })).toBe(true);
+  });
+  bad("missing firstExorcismFuzzOrdinal", (r) => delete r.firstExorcismFuzzOrdinal);
+  bad("firstExorcismFuzzOrdinal 0", (r) => (r.firstExorcismFuzzOrdinal = 0));
+  bad("a negative firstExorcismFuzzOrdinal", (r) => (r.firstExorcismFuzzOrdinal = -1));
+  bad("a non-integer firstExorcismFuzzOrdinal", (r) => (r.firstExorcismFuzzOrdinal = 2.5));
+  bad("a string firstExorcismFuzzOrdinal", (r) => (r.firstExorcismFuzzOrdinal = "3"));
   bad("missing depth", (r) => delete r.depth);
   bad("counts missing a class", (r) => delete r.counts["port-bug"]);
   bad("shrinking missing a field", (r) => delete r.shrinking.pairsOverCap);

@@ -60,6 +60,7 @@ const REPORT: SeanceReport = {
   counts: { match: 10, "reason-modernised": 0, exorcised: 0, "port-bug": 0 },
   taintedCalls: 0,
   setupCalls: 2,
+  firstExorcismFuzzOrdinal: null,
   exorcisms: [],
   portBugs: [],
   sequenceResults: { total: 1, endedExorcised: 0, exorcisedAtIndex: [] },

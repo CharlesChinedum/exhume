@@ -604,6 +604,16 @@
         "executionId": "d4e37e2a-a3d0-4adf-a188-fd5fee77f177",
         "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
         "timestamp": 1795711738356
+      },
+      {
+        "executionId": "5d9f44a3-25f9-4654-8e48-4fd42db47d0b",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795765269141
+      },
+      {
+        "executionId": "5d9f44a3-25f9-4654-8e48-4fd42db47d0b",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795765648512
       }
     ],
     "9.4 Write property test for exorcism truncation": [
@@ -788,6 +798,16 @@
         "executionId": "329a0902-a184-4624-a594-eca1dddbf133",
         "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
         "timestamp": 1795720583509
+      },
+      {
+        "executionId": "5d9f44a3-25f9-4654-8e48-4fd42db47d0b",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795765648633
+      },
+      {
+        "executionId": "5d9f44a3-25f9-4654-8e48-4fd42db47d0b",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795765956441
       }
     ],
     "13. BEC end-to-end acceptance": [
@@ -795,6 +815,37 @@
         "executionId": "329a0902-a184-4624-a594-eca1dddbf133",
         "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
         "timestamp": 1795720583641
+      }
+    ],
+    "15.1 Add the Planted_Port_Bug fixture and acceptance check": [
+      {
+        "executionId": "5d9f44a3-25f9-4654-8e48-4fd42db47d0b",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795765967351
+      },
+      {
+        "executionId": "5d9f44a3-25f9-4654-8e48-4fd42db47d0b",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795767093628
+      }
+    ],
+    "15.2 Run the planted-bug integration test in Docker": [
+      {
+        "executionId": "5d9f44a3-25f9-4654-8e48-4fd42db47d0b",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795767093728
+      },
+      {
+        "executionId": "5d9f44a3-25f9-4654-8e48-4fd42db47d0b",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795771484270
+      }
+    ],
+    "15. Planted port bug acceptance": [
+      {
+        "executionId": "5d9f44a3-25f9-4654-8e48-4fd42db47d0b",
+        "chatSessionId": "sess_aed4713f-cb61-4295-9df0-90845dc44bac",
+        "timestamp": 1795771484344
       }
     ]
   }

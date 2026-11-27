@@ -7,11 +7,9 @@
  * forge 1.5.1 campaigns are not reproducible, so a flaky result is investigated, not rerun) and every check
  * is a threshold or an invariant, never an exact count.
  *
- * Two inputs are not in the `SeanceReport` and come from the parsed discovery records:
- *  - the first exorcism's `fuzzOrdinal` (the 2,000-call measure; the report carries no such field), and
- *  - the sender's Legacy_Deployment balance at the time of the call.
- * `runBecAcceptance` obtains both from `<project>/seance-out/records.jsonl` through `parseRecords`, which
- * already excludes the replay tail and gives setup records no `fuzzOrdinal`.
+ * The 2,000-call budget reads `report.firstExorcismFuzzOrdinal`. One input is not in the `SeanceReport` and
+ * comes from the parsed discovery records: the sender's Legacy_Deployment balance at the time of the call.
+ * `runBecAcceptance` obtains the setup records from `<project>/seance-out/records.jsonl` through `parseRecords`.
  */
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -51,11 +49,6 @@ const DEFAULT_DEPLOYER = "0x" + "00".repeat(19) + "d0";
 export type LegacyBalance = bigint | { balance: bigint; approximate: boolean; note: string };
 
 export interface BecAcceptanceOptions {
-  /**
-   * `fuzzOrdinal` of the first `batchTransfer` exorcism, from the parsed records (see
-   * `firstExorcismFuzzOrdinal`). `undefined` or `null` when unknown: the budget check then FAILS (it is not skipped).
-   */
-  firstExorcismFuzzOrdinal?: number | null;
   /** Sender's balance in the Legacy_Deployment when the finding's call runs. Absent: the balance check FAILS. */
   legacyBalanceOf?: (sender: string, finding: Finding) => LegacyBalance | undefined;
 }
@@ -164,20 +157,6 @@ function decodeTransferFrom(calldata: string): { from: string; to: string; value
 // ---------------------------------------------------------------------------
 // Records-derived inputs
 // ---------------------------------------------------------------------------
-
-/**
- * `fuzzOrdinal` of the first `batchTransfer` exorcism in the kept records (tail dropped by `parseRecords`,
- * setup records have no `fuzzOrdinal`, tainted records skipped as findings never come from them).
- * `null` when there is none.
- */
-export function firstExorcismFuzzOrdinal(parsed: ParsedRecords, fn: string = BEC_FUNCTION): number | null {
-  for (const r of parsed.records) {
-    if (r.idx >= 0 && r.function === fn && r.classification === "exorcised" && !r.afterDivergence && r.fuzzOrdinal !== undefined) {
-      return r.fuzzOrdinal;
-    }
-  }
-  return null;
-}
 
 export interface DerivedBalance {
   balance: bigint;
@@ -299,7 +278,7 @@ export function checkBecAcceptance(report: SeanceReport, opts: BecAcceptanceOpti
   );
 
   // (3) call budget (only meaningful when an exorcism exists; a missing one is already a failure above)
-  const ordinal = opts.firstExorcismFuzzOrdinal ?? null;
+  const ordinal = report.firstExorcismFuzzOrdinal;
   if (!finding) {
     add(CONDITIONS.callBudget, "not-evaluated", ordinal, `at most ${BEC_FUZZ_BUDGET}`);
   } else {
@@ -453,9 +432,7 @@ export async function runBecAcceptance(
       seanceError("SEANCE_FAILED", `discovery records (${parsed.value.totalCalls} calls) do not match the report (${report.totalCalls} calls)`),
     );
   }
-  const ordinal = firstExorcismFuzzOrdinal(parsed.value);
   const checked = checkBecAcceptance(report, {
-    firstExorcismFuzzOrdinal: ordinal,
     legacyBalanceOf: (_sender, finding) =>
       deriveSenderLegacyBalance(parsed.value.setupRecords, finding, opts.initialSupply !== undefined ? { initialSupply: opts.initialSupply } : {}),
   });
@@ -463,4 +440,198 @@ export async function runBecAcceptance(
   const written = await writeReportAtomic(graveyardRoot, name, report);
   if (!written.ok) return written;
   return ok({ summary: checked.value, report, reportPath: written.value.path });
+}
+
+// ===========================================================================
+// Planted_Port_Bug acceptance (task 15.1, Requirement 10.1 to 10.6)
+// ===========================================================================
+
+export const PLANTED_FUNCTION = "transferFrom";
+/** Requirement 10.3: preceding calls, excluding the failing call. */
+export const PLANTED_MAX_PRECEDING = 3;
+/**
+ * State keys of the allowance getter in `differingFields` (`state.allowance(i,j)`, Actor_Set indices). BEC's
+ * `allowed` mapping is `internal`, so the Observable_State reads it through the public two-address getter
+ * `allowance(address,address)` (Requirement 10.4 says "the `allowed` mapping value").
+ */
+export const ALLOWANCE_STATE_PREFIX = "state.allowance(";
+/** Name used for the (optional) planted report: never `bec`. */
+export const PLANTED_REPORT_NAME = "bec-planted";
+
+export const PLANTED_CONDITIONS = {
+  notDetected: "planted-bug-not-detected",
+  countsMismatch: "port-bug-counts-mismatch",
+  notInTransferFrom: "port-bug-not-in-transferFrom",
+  noAllowanceField: "allowance-field-not-differing",
+  unshrunk: "unshrunk",
+  precedingCalls: "preceding-calls-exceed-3",
+  counts: "counts-sum",
+  reportInvalid: "report-invalid",
+} as const;
+
+export interface PlantedAcceptanceSummary {
+  checks: AcceptanceCheck[];
+  /** The finding that satisfies 10.2 to 10.5. */
+  finding: Finding;
+  precedingCalls: number;
+  differingFields: string[];
+}
+
+const isAllowanceKey = (f: string): boolean => f.startsWith(ALLOWANCE_STATE_PREFIX);
+
+/**
+ * Pure. Requirement 10: at least one `port-bug` (10.1) attributed to `transferFrom` (10.2), whose differing
+ * fields name an allowance state key after a call that returned the same result in both deployments (10.4,
+ * 10.5), and which is shrunk and replay-confirmed with at most 3 preceding calls (10.3). Zero port bugs
+ * fails with `planted-bug-not-detected` (10.6).
+ */
+export function checkPlantedBugAcceptance(report: SeanceReport): Result<PlantedAcceptanceSummary> {
+  const checks: AcceptanceCheck[] = [];
+  const add = (name: string, status: CheckStatus, observed: unknown, expected: unknown): void => {
+    checks.push({ name, status, observed, expected });
+  };
+  const N = "not-evaluated" as const;
+  const bugs = report.portBugs.filter(isPortBugFinding);
+  const counted = report.counts["port-bug"];
+
+  // 10.6 / 10.1
+  const none = counted === 0 && report.portBugs.length === 0;
+  add(PLANTED_CONDITIONS.notDetected, none ? "fail" : "pass", { counts: counted, findings: report.portBugs.length }, "at least one port-bug divergence");
+  if (none) {
+    for (const n of [
+      PLANTED_CONDITIONS.countsMismatch,
+      PLANTED_CONDITIONS.notInTransferFrom,
+      PLANTED_CONDITIONS.noAllowanceField,
+      PLANTED_CONDITIONS.unshrunk,
+      PLANTED_CONDITIONS.precedingCalls,
+    ]) {
+      add(n, N, null, null);
+    }
+  } else {
+    add(
+      PLANTED_CONDITIONS.countsMismatch,
+      counted >= 1 && report.portBugs.length >= 1 ? "pass" : "fail",
+      { counts: counted, findings: report.portBugs.length },
+      "counts['port-bug'] >= 1 and at least one port-bug finding",
+    );
+    // 10.2
+    const inTf = bugs.filter((f) => f.function === PLANTED_FUNCTION);
+    add(
+      PLANTED_CONDITIONS.notInTransferFrom,
+      inTf.length > 0 ? "pass" : "fail",
+      { portBugFunctions: [...new Set(bugs.map((f) => f.function))].sort() },
+      `a port-bug finding in ${PLANTED_FUNCTION}`,
+    );
+    // 10.4 / 10.5: allowance differs, the call itself returned the same result in both
+    const sameResult = (f: (typeof bugs)[number]): boolean => f.legacy.success === f.port.success && f.legacy.data === f.port.data;
+    const withAllowance = inTf.filter((f) => f.differingFields.some(isAllowanceKey) && sameResult(f));
+    if (inTf.length === 0) {
+      add(PLANTED_CONDITIONS.noAllowanceField, N, null, null);
+      add(PLANTED_CONDITIONS.unshrunk, N, null, null);
+      add(PLANTED_CONDITIONS.precedingCalls, N, null, null);
+    } else {
+      add(
+        PLANTED_CONDITIONS.noAllowanceField,
+        withAllowance.length > 0 ? "pass" : "fail",
+        inTf.map((f) => ({ differingFields: f.differingFields, sameResult: sameResult(f) })),
+        `a ${PLANTED_FUNCTION} finding with a ${ALLOWANCE_STATE_PREFIX}i,j) field and the same success and return data in both deployments`,
+      );
+      if (withAllowance.length === 0) {
+        add(PLANTED_CONDITIONS.unshrunk, N, null, null);
+        add(PLANTED_CONDITIONS.precedingCalls, N, null, null);
+      } else {
+        // 10.3
+        const shrunkOnes = withAllowance.filter((f) => !isUnshrunkFinding(f));
+        add(
+          PLANTED_CONDITIONS.unshrunk,
+          shrunkOnes.length > 0 ? "pass" : "fail",
+          shrunkOnes.length > 0
+            ? { shrunk: shrunkOnes.length }
+            : { unshrunkReason: withAllowance.map((f) => (isUnshrunkFinding(f) ? f.unshrunkReason : undefined)).filter((x) => x !== undefined)[0], unshrunkReasons: withAllowance.map((f) => (isUnshrunkFinding(f) ? f.unshrunkReason : null)) },
+          "a shrunk and replay-confirmed finding",
+        );
+        if (shrunkOnes.length === 0) {
+          add(PLANTED_CONDITIONS.precedingCalls, N, null, null);
+        } else {
+          const lens = shrunkOnes.map((f) => f.precedingCalls.length);
+          add(
+            PLANTED_CONDITIONS.precedingCalls,
+            lens.some((n) => n <= PLANTED_MAX_PRECEDING) ? "pass" : "fail",
+            { precedingCalls: lens },
+            `a shrunk finding with at most ${PLANTED_MAX_PRECEDING} preceding calls`,
+          );
+        }
+      }
+    }
+  }
+
+  const sum = Object.values(report.counts).reduce((a, b) => a + b, 0);
+  add(PLANTED_CONDITIONS.counts, sum === report.totalCalls ? "pass" : "fail", { sum, totalCalls: report.totalCalls }, "counts sum to totalCalls");
+  const valid = validateReport(report);
+  add(PLANTED_CONDITIONS.reportInvalid, valid.ok ? "pass" : "fail", valid.ok ? null : valid.error.message, "report passes schema and semantic validation");
+
+  const failed: FailedCondition[] = checks
+    .filter((c) => c.status === "fail")
+    .map((c) => ({ condition: c.name, observed: c.observed, expected: c.expected }));
+  if (failed.length > 0) {
+    const text = failed
+      .map((f) => {
+        const o = f.observed as { unshrunkReason?: string } | null;
+        return f.condition === PLANTED_CONDITIONS.unshrunk && o?.unshrunkReason !== undefined ? `${f.condition} (unshrunkReason: ${o.unshrunkReason})` : f.condition;
+      })
+      .join(", ");
+    return err(seanceError("ACCEPTANCE_FAILED", `Planted bug acceptance failed: ${text}`, { failed, checks, counts: report.counts }));
+  }
+  const best = bugs
+    .filter((f) => f.function === PLANTED_FUNCTION && !isUnshrunkFinding(f) && f.differingFields.some(isAllowanceKey) && f.precedingCalls.length <= PLANTED_MAX_PRECEDING)
+    .sort((a, b) => a.precedingCalls.length - b.precedingCalls.length)[0]!;
+  return ok({ checks, finding: best, precedingCalls: best.precedingCalls.length, differingFields: best.differingFields });
+}
+
+export interface PlantedBugDeps extends BecAcceptanceDeps {
+  /**
+   * Where the planted report goes, as `<outputRoot>/bec-planted/seance-report.json`, only on a pass.
+   * Absent: nothing is written. The input is always read from `graveyardRoot/bec`, which is never written.
+   */
+  outputRoot?: string;
+}
+
+export interface PlantedBugRun {
+  summary: PlantedAcceptanceSummary;
+  report: SeanceReport;
+  reportPath?: string;
+  /** Present when `keepTempOnSuccess` kept the temp project (records at `seance-out/records.jsonl`). */
+  tempDir?: string;
+}
+
+/**
+ * Loads `<graveyardRoot>/<name>` (default `bec`), replaces its port source with `plant(portSource)`, runs the
+ * séance and checks Requirement 10. The report is never written to the source entry.
+ */
+export async function runPlantedBugAcceptance(
+  deps: PlantedBugDeps,
+  opts: { plant: (portSource: string) => string; name?: string; fuzzSeed?: string; timeoutSeconds?: number },
+): Promise<Result<PlantedBugRun, SeanceError>> {
+  const input = loadGraveyardInput(deps.graveyardRoot, opts.name ?? "bec", {
+    ...(opts.fuzzSeed !== undefined && { fuzzSeed: opts.fuzzSeed }),
+    ...(opts.timeoutSeconds !== undefined && { timeoutSeconds: opts.timeoutSeconds }),
+  });
+  if (!input.ok) return input;
+  let planted: string;
+  try {
+    planted = opts.plant(input.value.portSource);
+  } catch (e) {
+    return err(seanceError("INVALID_INPUT", `cannot plant the bug: ${(e as Error).message}`));
+  }
+  const { graveyardRoot: _root, outputRoot, seance, ...rest } = deps;
+  const run = await (seance ?? runSeance)({ ...input.value, portSource: planted }, rest);
+  if (!run.ok) return run;
+  const { report, tempDir } = run.value;
+  const checked = checkPlantedBugAcceptance(report);
+  if (!checked.ok) return checked;
+  const kept = tempDir !== undefined ? { tempDir } : {};
+  if (outputRoot === undefined) return ok({ summary: checked.value, report, ...kept });
+  const written = await writeReportAtomic(outputRoot, PLANTED_REPORT_NAME, report);
+  if (!written.ok) return written;
+  return ok({ summary: checked.value, report, reportPath: written.value.path, ...kept });
 }
